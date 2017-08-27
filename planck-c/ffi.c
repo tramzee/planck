@@ -9,60 +9,6 @@
 #include "ffi.h"
 #include "jsc_utils.h"
 
-#include <stdio.h>
-
-unsigned char
-foo(unsigned int, float);
-
-int
-test_main(int argc, const char **argv)
-{
-    ffi_cif cif;
-    ffi_type *arg_types[2];
-    void *arg_values[2];
-    ffi_status status;
-
-    // Because the return value from foo() is smaller than sizeof(long), it
-    // must be passed as ffi_arg or ffi_sarg.
-    ffi_arg result;
-
-    // Specify the data type of each argument. Available types are defined
-    // in <ffi/ffi.h>.
-    arg_types[0] = &ffi_type_uint;
-    arg_types[1] = &ffi_type_float;
-
-    // Prepare the ffi_cif structure.
-    if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
-                               2, &ffi_type_uint8, arg_types)) != FFI_OK)
-    {
-        // Handle the ffi_status error.
-    }
-
-    // Specify the values of each argument.
-    unsigned int arg1 = 42;
-    float arg2 = 5.1;
-
-    arg_values[0] = &arg1;
-    arg_values[1] = &arg2;
-
-    // Invoke the function.
-    ffi_call(&cif, FFI_FN(foo), &result, arg_values);
-
-    // The ffi_arg 'result' now contains the unsigned char returned from foo(),
-    // which can be accessed by a typecast.
-    printf("result is %hhu", (unsigned char)result);
-
-    return 0;
-}
-
-// The target function.
-unsigned char
-foo(unsigned int x, float y)
-{
-    unsigned char result = x - y;
-    return result;
-}
-
 void* str_to_void_star(const char *s) {
     return (void*) atoll(s);
 }
@@ -142,9 +88,30 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
         void *fp = str_to_void_star(fp_str);
         free(fp_str);
 
-        double (*double_fn)(double);
-        double_fn = fp;
-        double result = (*double_fn)(JSValueToNumber(ctx, args[1], NULL));
+        ffi_cif cif;
+        ffi_type *arg_types[1];
+        void *arg_values[1];
+        ffi_status status;
+
+        // Specify the data type of each argument. Available types are defined
+        // in <ffi/ffi.h>.
+        arg_types[0] = &ffi_type_double;
+
+        // Prepare the ffi_cif structure.
+        if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
+                                   1, &ffi_type_double, arg_types)) != FFI_OK)
+        {
+            // Handle the ffi_status error.
+        }
+
+        // Specify the values of each argument.
+        double arg1 = JSValueToNumber(ctx, args[1], NULL);
+
+        arg_values[0] = &arg1;
+
+        // Invoke the function.
+        double result;
+        ffi_call(&cif, fp, &result, arg_values);
 
         return JSValueMakeNumber(ctx, result);
     }
