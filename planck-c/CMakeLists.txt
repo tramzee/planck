@@ -18,6 +18,8 @@ set(SOURCE_FILES
     edn.h
     engine.c
     engine.h
+    ffi.c
+    ffi.h
     file.c
     file.h
     functions.c
@@ -120,3 +122,5 @@ elseif(UNIX)
    find_package(Threads)
    target_link_libraries(planck ${CMAKE_THREAD_LIBS_INIT})
 endif(APPLE)
+
+target_link_libraries(planck ffi)
