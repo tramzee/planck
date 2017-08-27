@@ -90,6 +90,33 @@ void legal() {
     printf("\n");
     printf("\n");
 
+    printf("libffi\n");
+    printf("------\n");
+    printf("\n");
+    printf("Copyright (c) 1996-2014  Anthony Green, Red Hat, Inc and others.\n");
+    printf("See source files for details.\n");
+    printf("\n");
+    printf("Permission is hereby granted, free of charge, to any person obtaining\n");
+    printf("a copy of this software and associated documentation files (the\n");
+    printf("``Software''), to deal in the Software without restriction, including\n");
+    printf("without limitation the rights to use, copy, modify, merge, publish,\n");
+    printf("distribute, sublicense, and/or sell copies of the Software, and to\n");
+    printf("permit persons to whom the Software is furnished to do so, subject to\n");
+    printf("the following conditions:\n");
+    printf("\n");
+    printf("The above copyright notice and this permission notice shall be\n");
+    printf("included in all copies or substantial portions of the Software.\n");
+    printf("\n");
+    printf("THE SOFTWARE IS PROVIDED ``AS IS'', WITHOUT WARRANTY OF ANY KIND,\n");
+    printf("EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\n");
+    printf("MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.\n");
+    printf("IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\n");
+    printf("CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,\n");
+    printf("TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE\n");
+    printf("SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n");
+    printf("\n");
+    printf("\n");
+
     printf("libzip\n");
     printf("------\n");
     printf("\n");
