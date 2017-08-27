@@ -18,6 +18,7 @@
 #include "str.h"
 #include "engine.h"
 #include "clock.h"
+#include "ffi.h"
 
 JSGlobalContextRef ctx = NULL;
 
@@ -491,6 +492,11 @@ void *do_engine_init(void *data) {
     register_global_function(ctx, "PLANCK_SOCKET_LISTEN", function_socket_listen);
     register_global_function(ctx, "PLANCK_SOCKET_WRITE", function_socket_write);
     register_global_function(ctx, "PLANCK_SOCKET_CLOSE", function_socket_close);
+
+    register_global_function(ctx, "PLANCK_DLOPEN", function_dlopen);
+    register_global_function(ctx, "PLANCK_DLSYM", function_dlsym);
+    register_global_function(ctx, "PLANCK_DLCLOSE", function_dlclose);
+    register_global_function(ctx, "PLANCK_NATIVE_CALL", function_native_call);
 
     display_launch_timing("register fns");
 
