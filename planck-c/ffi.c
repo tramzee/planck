@@ -4,6 +4,7 @@
 #include <ffi.h>
 #endif
 
+#include <stdlib.h>
 #include <dlfcn.h>
 
 #include "ffi.h"
