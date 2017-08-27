@@ -88,32 +88,37 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
         void *fp = str_to_void_star(fp_str);
         free(fp_str);
 
-        ffi_cif cif;
-        ffi_type *arg_types[1];
-        void *arg_values[1];
-        ffi_status status;
+        unsigned int arg_count = 1;
 
-        // Specify the data type of each argument. Available types are defined
-        // in <ffi/ffi.h>.
+        ffi_cif cif;
+        ffi_type *arg_types[arg_count];
         arg_types[0] = &ffi_type_double;
+
+        ffi_type* return_type = &ffi_type_double;
+
+        ffi_status status;
 
         // Prepare the ffi_cif structure.
         if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
-                                   1, &ffi_type_double, arg_types)) != FFI_OK)
+                                   arg_count, return_type, arg_types)) != FFI_OK)
         {
             // Handle the ffi_status error.
         }
 
-        // Specify the values of each argument.
-        double arg1 = JSValueToNumber(ctx, args[1], NULL);
+        void *arg_values[1];
+        arg_values[0] = malloc(sizeof(double));
+        *(double*)arg_values[0] = JSValueToNumber(ctx, args[1], NULL);
 
-        arg_values[0] = &arg1;
+        void* result = malloc(sizeof(double));
 
-        // Invoke the function.
-        double result;
-        ffi_call(&cif, fp, &result, arg_values);
+        ffi_call(&cif, fp, result, arg_values);
 
-        return JSValueMakeNumber(ctx, result);
+        JSValueRef rv = JSValueMakeNumber(ctx, *(double*)result);
+
+        free(arg_values[0]);
+        free(result);
+
+        return rv;
     }
 
     return JSValueMakeNull(ctx);
