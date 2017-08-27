@@ -130,3 +130,5 @@ elseif(UNIX)
    include_directories(${LIBFFI_INCLUDE_DIRS})
    target_link_libraries(planck ${LIBFFI_LDFLAGS})
 endif(APPLE)
+   
+target_link_libraries(planck dl)
