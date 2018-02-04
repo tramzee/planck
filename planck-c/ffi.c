@@ -360,4 +360,16 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
  * (js/PLANCK_NATIVE_CALL funky 3 #js [3] #js [3.2])
  * (js/PLANCK_DLCLOSE libnative)
  * Third line should should evaluate to 0.42434936931066086
+ *
+ * A wrapper ClojureScript library might have code like
+ *
+ * (defn make-fn [sym ret-type arg-types]
+ *   (fn [& args]
+ *     (js/PLANCK_NATIVE_CALL sym ret-type arg-types (into-array args))))
+ *
+ * which makes it easly to instead do
+ *
+ * (def funky (make-fn (js/PLANCK_DLSYM libnative "funky") 3 #js [3]))
+ *
+ * (funky 3.2)
  */
