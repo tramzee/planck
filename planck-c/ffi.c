@@ -339,3 +339,25 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
 
     return JSValueMakeNull(ctx);
 }
+
+/*
+ * How to use.
+ *
+ * Let native.c contain
+ * #include <math.h>
+ *
+ * double funky(double x) {
+ *	return sinh(1.0 / tgamma(x));
+ * }
+ *
+ * Compile with
+ * cc -fPIC -shared -o libnative.so native.c
+ *
+ * Then in Planck
+ *
+ * (def libnative (js/PLANCK_DLOPEN "libnative.so"))
+ * (def funky (js/PLANCK_DLSYM libnative "funky"))
+ * (js/PLANCK_NATIVE_CALL funky 3 #js [3] #js [3.2])
+ * (js/PLANCK_DLCLOSE libnative)
+ * Third line should should evaluate to 0.42434936931066086
+ */
