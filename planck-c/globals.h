@@ -1,6 +1,6 @@
 // Global variables used throughout Planck
 
-#define PLANCK_VERSION "2.7.3"
+#define PLANCK_VERSION "2.11.0"
 
 #define EXIT_SUCCESS_INTERNAL -257
 
@@ -9,6 +9,7 @@
 struct src_path {
     char *type;
     char *path;
+    void *archive;
     bool blacklisted;
 };
 

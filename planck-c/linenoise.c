@@ -118,6 +118,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "linenoise.h"
 #include "clock.h"
 
@@ -140,7 +141,7 @@ uint64_t lastCharRead;
 static int pasting = 0;
 static const char *currentPromptAnsiCode;
 
-static struct linenoiseState *printNowState;
+static struct linenoiseState *activeState;
 
 /* The linenoiseState structure represents the state during line editing.
  * We pass this state to functions implementing specific editing
@@ -372,6 +373,8 @@ static void freeCompletions(linenoiseCompletions *lc) {
         free(lc->cvec);
 }
 
+int linenoiseEditInsert(struct linenoiseState *l, char c);
+
 /* This is an helper function for linenoiseEdit() and is called when the
  * user types the <tab> key in order to complete the string currently in the
  * input.
@@ -384,54 +387,42 @@ static int completeLine(struct linenoiseState *ls) {
     char c = 0;
 
     completionCallback(ls->buf, &lc);
-    if (lc.len == 0) {
+    if (lc.len == 1) {
         linenoiseBeep();
+    } else if (lc.len == 2) {
+        size_t i;
+        size_t prefix_len = strlen(lc.cvec[0]);
+        size_t count = strlen(lc.cvec[1]) - prefix_len;
+        for (i = 0; i < count; i++) {
+            linenoiseEditInsert(ls, lc.cvec[1][prefix_len + i]);
+        }
+        refreshLine(ls);
     } else {
-        size_t stop = 0, i = 0;
-
-        while (!stop) {
-            /* Show completion or original buffer */
-            if (i < lc.len) {
-                struct linenoiseState saved = *ls;
-
-                ls->len = ls->pos = strlen(lc.cvec[i]);
-                ls->buf = lc.cvec[i];
-                refreshLine(ls);
-                ls->len = saved.len;
-                ls->pos = saved.pos;
-                ls->buf = saved.buf;
-            } else {
-                refreshLine(ls);
-            }
-
-            nread = read(ls->ifd, &c, 1);
-            if (nread <= 0) {
-                freeCompletions(&lc);
-                return -1;
-            }
-
-            switch (c) {
-                case 9: /* tab */
-                    i = (i + 1) % (lc.len + 1);
-                    if (i == lc.len) linenoiseBeep();
-                    break;
-                case 27: /* escape */
-                    /* Re-show original buffer */
-                    if (i < lc.len) refreshLine(ls);
-                    stop = 1;
-                    break;
-                default:
-                    /* Update buffer and return */
-                    if (i < lc.len) {
-                        nwritten = snprintf(ls->buf, ls->buflen, "%s", lc.cvec[i]);
-                        ls->len = ls->pos = nwritten;
-                    }
-                    stop = 1;
-                    break;
+        size_t i;
+        size_t max_completion_length = 0;
+        for (i = 1; i < lc.len; i++) {
+            if (strlen(lc.cvec[i]) > max_completion_length) {
+                max_completion_length = strlen(lc.cvec[i]);
             }
         }
-    }
+        size_t column_width = max_completion_length + 1;
 
+        size_t columns = (getColumns(STDIN_FILENO, STDOUT_FILENO) - 4) / column_width;
+
+        char format[100];
+        sprintf(format, "%%-%zus", column_width);
+
+        for (i = 1; i < lc.len; i++) {
+            if ((i - 1) % columns == 0) {
+                printf("\r\n");
+            }
+            printf(format, lc.cvec[i]);
+            printf(" ");
+        }
+        printf("\n");
+        printf("\n");
+        refreshLine(ls);
+    }
     freeCompletions(&lc);
     return c; /* Return last read character */
 }
@@ -685,6 +676,25 @@ void linenoiseEditMoveRight(struct linenoiseState *l) {
     }
 }
 
+/* Move cursor to the end of the current word. */
+void linenoiseEditMoveWordEnd(struct linenoiseState *l) {
+    if (l->len == 0 || l->pos >= l->len) return;
+    if (l->buf[l->pos] == ' ')
+        while (l->pos < l->len && l->buf[l->pos] == ' ') ++l->pos;
+    while (l->pos < l->len && l->buf[l->pos] != ' ') ++l->pos;
+    refreshLine(l);
+}
+
+/* Move cursor to the start of the current word. */
+void linenoiseEditMoveWordStart(struct linenoiseState *l) {
+    if (l->len == 0) return;
+    if (l->buf[l->pos-1] == ' ') --l->pos;
+    if (l->buf[l->pos] == ' ')
+        while (l->pos > 0 && l->buf[l->pos] == ' ') --l->pos;
+    while (l->pos > 0 && l->buf[l->pos-1] != ' ') --l->pos;
+    refreshLine(l);
+}
+
 /* Move cursor to the start of the line. */
 void linenoiseEditMoveHome(struct linenoiseState *l) {
     if (l->pos != 0) {
@@ -766,6 +776,16 @@ void linenoiseEditDeletePrevWord(struct linenoiseState *l) {
     refreshLine(l);
 }
 
+/* Delete the next word, maintaining the cursor at the same position */
+void linenoiseEditDeleteNextWord(struct linenoiseState *l) {
+    size_t next_word_end = l->pos;
+    while (next_word_end < l->len && l->buf[next_word_end] == ' ') ++next_word_end;
+    while (next_word_end < l->len && l->buf[next_word_end] != ' ') ++next_word_end;
+    memmove(l->buf+l->pos, l->buf+next_word_end, l->len-next_word_end);
+    l->len -= next_word_end - l->pos;
+    refreshLine(l);
+}
+
 static void set_current(struct linenoiseState *current, const char *str) {
     strncpy(current->buf, str, current->buflen);
     current->buf[current->buflen - 1] = 0;
@@ -814,7 +834,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
     refreshLine(&l);
 
     // Set things up so we can handle async prints coming int
-    printNowState = &l;
+    activeState = &l;
 
     while (1) {
         char c;
@@ -837,7 +857,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
         }
 
         if (nread <= 0) {
-            printNowState = NULL;
+            activeState = NULL;
             return l.len;
         }
 
@@ -895,7 +915,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             c = completeLine(&l);
             /* Return on errors */
             if (c < 0) {
-                printNowState = NULL;
+                activeState = NULL;
                 return l.len;
             }
             /* Read next character when 0 */
@@ -909,11 +929,11 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             history_len--;
             free(history[history_len]);
             if (mlmode) linenoiseEditMoveEnd(&l);
-            printNowState = NULL;
+            activeState = NULL;
             return (int) l.len;
         } else if (c == keymap[KM_CANCEL]) {
             errno = EAGAIN;
-            printNowState = NULL;
+            activeState = NULL;
             return -1;
         } else if (c == keymap[KM_BACKSPACE] || c == keymap[KM_DELETE]) {
             linenoiseEditBackspace(&l);
@@ -924,7 +944,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             } else {
                 history_len--;
                 free(history[history_len]);
-                printNowState = NULL;
+                activeState = NULL;
                 return -1;
             }
         } else if (c == keymap[KM_SWAP_CHARS]) { /* swaps current character with previous. */
@@ -1046,7 +1066,19 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             if (read(l.ifd, seq, 1) != -1) {
                 if (seq[0] != '[' && seq[0] != 'O') {
                     c = seq[0];
-                    goto process_char;
+                    switch (seq[0]) {
+                    case 'f':
+                        linenoiseEditMoveWordEnd(&l);
+                        break;
+                    case 'b':
+                        linenoiseEditMoveWordStart(&l);
+                        break;
+                    case 'd':
+                        linenoiseEditDeleteNextWord(&l);
+                        break;
+                    default:
+                        goto process_char;
+                    }
                 } else if (read(l.ifd, seq + 1, 1) != -1) {
 
                     /* ESC [ sequences. */
@@ -1117,12 +1149,12 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             linenoiseEditDeletePrevWord(&l);
         } else {
             if (linenoiseEditInsert(&l, c)) {
-                printNowState = NULL;
+                activeState = NULL;
                 return -1;
             }
         }
     }
-    printNowState = NULL;
+    activeState = NULL;
     return l.len;
 }
 
@@ -1243,8 +1275,8 @@ void linenoisePrintNow(const char *text) {
     if (strcmp(text, "\n") != 0) {
         fprintf(stdout, "\r\x1b[0K%s\n", text);
 
-        if (printNowState) {
-            refreshLine(printNowState);
+        if (activeState) {
+            refreshLine(activeState);
         }
     }
 }
@@ -1404,4 +1436,14 @@ int linenoiseHistoryLoad(const char *filename) {
     }
     fclose(fp);
     return 0;
+}
+
+void sigwinchHandler( int sig_number ) {
+    if (activeState) {
+        activeState->cols = getColumns(activeState->ifd, activeState->ofd);
+    }
+}
+
+void linenoiseSetupSigWinchHandler() {
+    signal(SIGWINCH, sigwinchHandler);
 }

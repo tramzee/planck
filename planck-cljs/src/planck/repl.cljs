@@ -440,6 +440,12 @@
           ((juxt :defs :macros)
            (get-namespace ns-sym)))))))
 
+(defn- completion-candidates-for-current-ns []
+  (let [cur-ns @current-ns]
+    (into (completion-candidates-for-ns cur-ns true)
+      (comp (mapcat keys) (map str))
+      ((juxt :renames :rename-macros :uses :use-macros) (get-namespace cur-ns)))))
+
 (defn- is-completion?
   [match-suffix candidate]
   (let [escaped-suffix (string/replace match-suffix #"[-\/\\^$*+?.()|\[\]{}]" "\\$&")]
@@ -536,7 +542,7 @@
            (map #(str % "/") (keys (current-alias-map)))
            (completion-candidates-for-ns 'cljs.core false)
            (completion-candidates-for-ns 'cljs.core$macros false)
-           (completion-candidates-for-ns @current-ns true)
+           (completion-candidates-for-current-ns)
            (when top-form?
              (concat
                (map str (keys special-doc-map))
@@ -559,27 +565,45 @@
   (second (re-find #"::([a-zA-Z-]*)$" buffer)))
 
 (defn- local-keyword-completions
-  [buffer kw-name]
-  (let [buffer-prefix (subs buffer 0 (- (count buffer) (count kw-name) 2))]
-    (clj->js (sequence
-               (comp
-                 (map local-keyword-str)
-                 (filter #(string/starts-with? % (str "::" kw-name)))
-                 (map #(str buffer-prefix %)))
-               (spec-registered-keywords @current-ns)))))
+  [kw-name]
+  (let [kw-source (str "::" kw-name)]
+    (clj->js (into [kw-source]
+               (sequence
+                 (comp
+                   (map local-keyword-str)
+                   (filter #(string/starts-with? % kw-source)))
+                 (spec-registered-keywords @current-ns))))))
+
+(defn- longest-common-prefix
+  [strings]
+  (let [minl (apply min (map count strings))]
+    (loop [l minl]
+      (if (> l 0)
+        (if (every? #{(subs (first strings) 0 l)}
+              (map #(subs % 0 l) (rest strings)))
+          (subs (first strings) 0 l)
+          (recur (dec l)))
+        ""))))
 
 (defn- ^:export get-completions
+  "Returns an array of the buffer-match-suffix, along with completions for the
+  entered text. If one completion is returned the line should be completed to
+  match it (in which the completion may actually only be a longest prefix from
+  the list of candiates), otherwise the list of completions should be
+  displayed."
   [buffer]
   (if-let [kw-name (local-keyword buffer)]
-    (local-keyword-completions buffer kw-name)
+    (local-keyword-completions kw-name)
     (let [top-form? (re-find #"^\s*\(\s*[^()\s]*$" buffer)
-          typed-ns  (second (re-find #"\(*(\b[a-zA-Z-.<>*=&?]+)/[a-zA-Z-]*$" buffer))]
-      (let [buffer-match-suffix (first (re-find #":?([a-zA-Z-.<>*=&?]*|^\(/)$" buffer))
-            buffer-prefix       (subs buffer 0 (- (count buffer) (count buffer-match-suffix)))]
-        (clj->js (map #(str buffer-prefix %)
-                   (sort
-                     (filter (partial is-completion? buffer-match-suffix)
-                       (completion-candidates top-form? typed-ns)))))))))
+          typed-ns  (second (re-find #"\(*(\b[a-zA-Z0-9-.<>*=&?]+)/[a-zA-Z0-9-]*$" buffer))]
+      (let [buffer-match-suffix (first (re-find #":?([a-zA-Z0-9-.<>*=&?]*|^\(/)$" buffer))
+            completions         (sort (filter (partial is-completion? buffer-match-suffix)
+                                        (completion-candidates top-form? typed-ns)))
+            common-prefix (longest-common-prefix completions)]
+        (if (or (empty? common-prefix)
+                (= common-prefix buffer-match-suffix))
+          (clj->js (into [buffer-match-suffix] completions))
+          #js [buffer-match-suffix common-prefix])))))
 
 (defn- is-completely-readable?
   [source]
@@ -656,7 +680,7 @@
   ([] (form-compiled-by-string nil))
   ([opts]
    (str "// Compiled by ClojureScript "
-     *clojurescript-version*
+     (or *clojurescript-version* "0.0.0000")
      (when opts
        (str " " (pr-str opts))))))
 
@@ -739,7 +763,9 @@
     (let [exception (js/PLANCK_EVAL source source-url)]
       (when exception
         (throw exception)))
-    (js/eval source)))
+    ;; Eval in global scope
+    (let [geval js/eval]
+      (geval source))))
 
 (defn- cacheable?
   [{:keys [path name source source-url cache]}]
@@ -891,6 +917,7 @@
 (defn- skip-load?
   [{:keys [name macros]}]
   (or
+   (= name 'goog)
    (= name 'cljsjs.parinfer)
    (= name 'cljs.core)
    (and (= name 'clojure.core.rrb-vector.macros) macros)
@@ -911,14 +938,21 @@
 
 (declare goog-dep-source)
 
+(defn- load-minified-libs?
+  [opts]
+  (= :simple (:optimizations opts)))
+
 ;; TODO: we could be smarter and only load the libs that we haven't already loaded
 (defn- load-js-lib
-  [name cb]
-  (let [sources (mapcat (fn [{:keys [file requires]}]
-                          (concat (->> requires
-                                    (filter #(string/starts-with? % "goog."))
-                                    (map (comp goog-dep-source symbol)))
-                            [(first (js/PLANCK_LOAD file))]))
+  [name opts cb]
+  (let [sources (mapcat (fn [{:keys [file file-min requires]}]
+                          (let [file (or (and (load-minified-libs? opts)
+                                              file-min)
+                                         file)]
+                            (concat (->> requires
+                                      (filter #(string/starts-with? % "goog."))
+                                      (map (comp goog-dep-source symbol)))
+                              [(first (js/PLANCK_LOAD file))])))
                   (deps/js-libs-to-load name))]
     (cb {:lang :js
          :source (string/join "\n" sources)})
@@ -975,15 +1009,23 @@
 
 ; file here is an alternate parameter denoting a filesystem path
 (defn- load
-  [{:keys [name macros path file] :as full} cb]
+  [{:keys [name macros path file] :as full} opts cb]
   (cond
     file (load-file file cb)
     (skip-load? full) (cb {:lang   :js
                            :source ""})
     (re-matches #"^goog/.*" path) (load-goog name cb)
-    (deps/js-lib? name) (load-js-lib name cb)
+    (deps/js-lib? name) (load-js-lib name opts cb)
     (= name 'cljs.nodejs) (load-cljs-nodejs name path cb)
     :else (load-other name path macros cb)))
+
+(defn- load-opts
+  []
+  (select-keys @app-env [:optimizations]))
+
+(defn- load-fn
+  [m cb]
+  (load m (load-opts) cb))
 
 (declare skip-cljsjs-eval-error)
 
@@ -1011,7 +1053,7 @@
   [main-ns & args]
   (let [main-args (js->clj args)
         opts      (make-base-eval-opts)]
-    (binding [cljs/*load-fn* load
+    (binding [cljs/*load-fn* load-fn
               cljs/*eval-fn* (get-eval-fn)]
       (cljs/eval st
         `(~'require (quote ~(symbol main-ns)))
@@ -1319,8 +1361,8 @@
   [env sym]
   (binding [ana/*cljs-warning-handlers* nil]
     (let [var (or (with-compiler-env st (resolve-var env sym))
-                  (some #(get-macro-var env sym %)
-                    (vals (get-in @st [::ana/namespaces @current-ns :use-macros]))))]
+                  (when-let [macros-ns (sym (get-in @st [::ana/namespaces @current-ns :use-macros]))]
+                    (get-macro-var env sym macros-ns)))]
       (when var
         (-> (cond-> var
               (not (:ns var))
@@ -1353,8 +1395,9 @@
         (when-let [file-source (get-file-source filepath)]
           (let [rdr (rt/source-logging-push-back-reader file-source)]
             (dotimes [_ (dec (:line var))] (rt/read-line rdr))
-            (-> (r/read {:read-cond :allow :features #{:cljs}} rdr)
-              meta :source))))))
+            (binding [r/*alias-map* (reify ILookup (-lookup [_ k] k))]
+              (-> (r/read {:read-cond :allow :features #{:cljs}} rdr)
+                meta :source)))))))
 
 (defn- run-sync!
   "Like cljs.js/run-async!, but with the expectation that cb will be called
@@ -1395,7 +1438,7 @@
 (defn- process-execute-path
   [file opts]
   (binding [theme (assoc theme :err-font (:verbose-font theme))]
-    (load {:file file}
+    (load-fn {:file file}
       (fn [{:keys [lang source source-url cache]}]
         (if source
           (case lang
@@ -1411,12 +1454,21 @@
                             (js-eval source source-url))))))))
           (handle-error (js/Error. (str "Could not load file " file)) false))))))
 
+(defn- resolve-ns
+  "Resolves a namespace symbol to a namespace by first checking to see if it
+  is a namespace alias."
+  [ns-sym]
+  (or (get-in @st [::ana/namespaces ana/*cljs-ns* :requires ns-sym])
+      (get-in @st [::ana/namespaces ana/*cljs-ns* :require-macros ns-sym])
+      ns-sym))
+
 (defn- dir*
   [nsname]
-  (run! prn
-    (distinct (sort (concat
-                      (public-syms nsname)
-                      (public-syms (add-macros-suffix nsname)))))))
+  (let [ns (resolve-ns nsname)]
+    (run! prn
+      (distinct (sort (concat
+                        (public-syms ns)
+                        (public-syms (add-macros-suffix ns))))))))
 
 (defn- apropos*
   [str-or-pattern]
@@ -1780,10 +1832,10 @@
             {:ns initial-ns}
             (select-keys @app-env [:verbose :checked-arrays :static-fns :fn-invoke-direct])
             (if expression?
-              (merge {:context       :expr}
-                (if (load-form? expression-form)
-                  {:source-map true}
-                  {:def-emits-var true}))
+              (merge {:context       :expr
+                      :def-emits-var true}
+                (when (load-form? expression-form)
+                  {:source-map true}))
               (merge {:source-map true}
                 (when (:cache-path @app-env)
                   {:cache-source (cache-source-fn source-text)}))))
@@ -1809,7 +1861,7 @@
   [[source-type source-value] {:keys [expression?] :as opts}]
   (binding [ana/*cljs-ns*    @current-ns
             *ns*             (create-ns @current-ns)
-            cljs/*load-fn*   load
+            cljs/*load-fn*   load-fn
             cljs/*eval-fn*   (get-eval-fn)
             r/*data-readers* tags/*cljs-data-readers*]
     (if-not (= "text" source-type)
@@ -1901,7 +1953,7 @@
   found."
   [s]
   (try
-    (when-let [var (some->> s repl-read-string first (resolve-var @env/*compiler*))]
+    (when-let [var (some->> s repl-read-string first (resolve-var (assoc @env/*compiler* :ns (ana/get-namespace ana/*cljs-ns*))))]
       (let [arglists (if-not (or (:macro var))
                        (:arglists var)
                        (-> var :meta :arglists second))]
@@ -1910,10 +1962,6 @@
           arglists)))
     (catch :default _
       nil)))
-
-(s/fdef get-arglists
-  :args (s/cat :s string?)
-  :ret (s/nilable (s/coll-of vector? :kind list?)))
 
 (defn- intern
   ([ns name]
@@ -1935,14 +1983,3 @@
         (orig-print-err-fn (:err-font theme))
         (orig-print-err-fn msg)
         (orig-print-err-fn (:reset-font theme))))))
-
-(defn- register-speced-vars
-  "Facilitates workaround if CLJS-1989 not in place."
-  [& speced-vars]
-  (when (neg? (gstring/compareVersions *clojurescript-version* "1.9.655"))
-    (let [_speced_vars (eval 'cljs.spec.alpha$macros/_speced_vars)]
-      (doseq [speced-var speced-vars]
-        (swap! _speced_vars conj speced-var)))))
-
-(register-speced-vars
-  `get-arglists)

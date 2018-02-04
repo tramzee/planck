@@ -5,6 +5,8 @@
    [planck.core :refer [with-open]])
   (:require
    [cljs.spec.alpha :as s]
+   [cljs.tools.reader :as r]
+   [cljs.tools.reader.reader-types :as rt]
    [clojure.string :as string]
    [planck.repl :as repl])
   (:import
@@ -44,63 +46,85 @@
   (-read [this] "Returns available characters as a string or nil if EOF."))
 
 (defprotocol IBufferedReader
-  "Protocol for reading line-based content."
+  "Protocol for reading line-based content. Instances of IBufferedReader must
+   also satisfy IReader."
   (-read-line [this] "Reads the next line."))
 
-(defrecord Reader [raw-read raw-close]
-  IReader
-  (-read [_]
-    (raw-read))
-  IClosable
-  (-close [_]
-    (raw-close)))
+(defprotocol IPushbackReader
+  "Protocol for readers that support undo. Instances of IPushbackReader must
+  also satisfy IBufferedReader."
+  (-unread [this s] "Pushes a string of characters back on to the stream."))
 
-(defrecord BufferedReader [raw-read raw-close buffer pos]
-  IReader
-  (-read [_]
-    (if-some [buffered @buffer]
-      (do
-        (reset! buffer nil)
-        (subs buffered @pos))
-      (raw-read)))
-  IBufferedReader
-  (-read-line [this]
-    (loop []
+(defn- fission!
+  "Breaks an atom's value into two parts. The supplied function should
+  return a pair. The first element will be set to be the atom's new
+  value and the second element will be returned."
+  [atom f & args]
+  (loop []
+    (let [old @atom
+          [new-in new-out] (apply f old args)]
+      (if (compare-and-set! atom old new-in)
+        new-out
+        (recur)))))
+
+(defn- make-raw-pushback-reader
+  [raw-read raw-close buffer pos]
+  (reify
+    IReader
+    (-read [_]
       (if-some [buffered @buffer]
-        (if-some [n (string/index-of buffered "\n" @pos)]
-          (let [rv (subs buffered @pos n)]
-            (reset! pos (inc n))
-            rv)
+        (do
+          (reset! buffer nil)
+          (subs buffered @pos))
+        (raw-read)))
+
+    IBufferedReader
+    (-read-line [this]
+      (loop []
+        (if-some [buffered @buffer]
+          (if-some [n (string/index-of buffered "\n" @pos)]
+            (let [rv (subs buffered @pos n)]
+              (reset! pos (inc n))
+              rv)
+            (if-some [new-chars (raw-read)]
+              (do
+                (reset! buffer (str (subs buffered @pos) new-chars))
+                (reset! pos 0)
+                (recur))
+              (do
+                (reset! buffer nil)
+                (let [rv (subs buffered @pos)]
+                  (if (= rv "")
+                    nil
+                    rv)))))
           (if-some [new-chars (raw-read)]
             (do
-              (reset! buffer (str (subs buffered @pos) new-chars))
+              (reset! buffer new-chars)
               (reset! pos 0)
               (recur))
-            (do
-              (reset! buffer nil)
-              (let [rv (subs buffered @pos)]
-                (if (= rv "")
-                  nil
-                  rv)))))
-        (if-some [new-chars (raw-read)]
-          (do
-            (reset! buffer new-chars)
-            (reset! pos 0)
-            (recur))
-          nil))))
-  IClosable
-  (-close [_]
-    (raw-close)))
+            nil))))
 
-(defrecord Writer [raw-write raw-flush raw-close]
-  IWriter
-  (-write [_ s]
-    (raw-write s))
-  (-flush [_]
-    (raw-flush))
-  IClosable
-  (-close [_]
-    (raw-close)))
+    IPushbackReader
+    (-unread [_ s]
+      (swap! buffer #(str s %))
+      (reset! pos 0))
+
+    IClosable
+    (-close [_]
+      (raw-close))))
+
+(defn- make-raw-writer
+  [raw-write raw-flush raw-close]
+  (reify
+    IWriter
+    (-write [_ s]
+      (raw-write s))
+    (-flush [_]
+      (raw-flush))
+
+    IClosable
+    (-close [_]
+      (raw-close))))
 
 (defprotocol IInputStream
   "Protocol for reading binary data."
@@ -111,30 +135,36 @@
   (-write-bytes [this byte-array] "Writes byte array.")
   (-flush-bytes [this] "Flushes output."))
 
-(defrecord InputStream [raw-read-bytes raw-close]
-  IInputStream
-  (-read-bytes [_]
-    (raw-read-bytes))
-  IClosable
-  (-close [_]
-    (raw-close)))
+(defn- make-raw-input-stream
+  [raw-read-bytes raw-close]
+  (reify
+    IInputStream
+    (-read-bytes [_]
+      (raw-read-bytes))
 
-(defrecord OutputStream [raw-write-bytes raw-flush-bytes raw-close]
-  IOutputStream
-  (-write-bytes [_ byte-array]
-    (raw-write-bytes byte-array))
-  (-flush-bytes [_]
-    (raw-flush-bytes))
-  IClosable
-  (-close [_]
-    (raw-close)))
+    IClosable
+    (-close [_]
+      (raw-close))))
+
+(defn- make-raw-output-stream
+  [raw-write-bytes raw-flush-bytes raw-close]
+  (reify
+    IOutputStream
+    (-write-bytes [_ byte-array]
+      (raw-write-bytes byte-array))
+    (-flush-bytes [_]
+      (raw-flush-bytes))
+
+    IClosable
+    (-close [_]
+      (raw-close))))
 
 (defonce
-  ^{:doc     "An IReader representing standard input for read operations."
+  ^{:doc     "An IPushbackReader representing standard input for read operations."
     :dynamic true}
   *in*
   (let [closed (atom false)]
-    (->BufferedReader
+    (make-raw-pushback-reader
       (fn []
         (when-not @closed
           (js/PLANCK_RAW_READ_STDIN)))
@@ -145,7 +175,7 @@
 (defn- make-closeable-raw-writer
   [raw-write raw-flush]
   (let [closed (atom false)]
-    (->Writer
+    (make-raw-writer
       (fn [s]
         (when-not @closed
           (raw-write s)))
@@ -166,7 +196,6 @@
   ^{:doc "A sequence of the supplied command line arguments, or nil if
   none were supplied"}
   *command-line-args*
-  ;; TODO initialize with cljs.core/*command-line-args* we depend on next ClojureScript version
   (-> js/PLANCK_INITIAL_COMMAND_LINE_ARGS js->clj seq))
 
 (defn read-line
@@ -178,6 +207,68 @@
   :args (s/cat)
   :ret string?)
 
+(defn- adapt-pushback-reader
+  [pushback-reader]
+  (reify
+    rt/Reader
+    (read-char [this]
+      (when-some [characters (-read pushback-reader)]
+        (when (> (.-length characters) 1)
+          (-unread pushback-reader (subs characters 1)))
+        (subs characters 0 1)))
+    (peek-char [this]
+      (when-some [ch (rt/read-char this)]
+        (-unread pushback-reader ch)
+        ch))
+    rt/IPushbackReader
+    (unread [this ch]
+      (when (some? ch)
+        (-unread pushback-reader ch)))))
+
+(defn read
+  "Reads the first object from an IPushbackReader.
+  Returns the object read. If EOF, throws if eof-error? is true.
+  Otherwise returns sentinel. If no reader is provided, *in* will be used.
+  Opts is a persistent map with valid keys:
+     :read-cond - :allow to process reader conditionals, or
+                  :preserve to keep all branches
+     :features - persistent set of feature keywords for reader conditionals
+     :eof - on eof, return value unless :eofthrow, then throw.
+            if not specified, will throw"
+  ([] (read *in*))
+  ([reader]
+   (r/read (adapt-pushback-reader reader)))
+  ([opts reader]
+   (r/read opts (adapt-pushback-reader reader)))
+  ([reader eof-error? eof-value]
+   (r/read (adapt-pushback-reader reader) eof-error? eof-value)))
+
+(s/fdef read
+  :args (s/alt :nullary (s/cat)
+               :unary (s/cat :reader #(satisfies? IPushbackReader %))
+               :binary (s/cat :opts map? :reader #(satisfies? IPushbackReader %))
+               :ternary (s/cat :reader #(satisfies? IPushbackReader %) :eof-error? boolean? :eof-value any?)))
+
+(defn- make-string-reader
+  [s]
+  (let [content (volatile! s)]
+    (make-raw-pushback-reader
+      (fn [] (let [return @content]
+               (vreset! content nil)
+               return))
+      (fn [])
+      (atom nil)
+      (atom 0))))
+
+(defn read-string
+  "Reads one object from the string s. Optionally include reader
+  options, as specified in read."
+  ([s] (read (make-string-reader s)))
+  ([opts s] (read opts (make-string-reader s))))
+
+(s/fdef read-string
+  :args (s/alt :unary (s/cat :s string?)
+               :binary (s/cat :opts map? :s string?)))
 (defn line-seq
   "Returns the lines of text from rdr as a lazy sequence of strings. rdr must
   implement IBufferedReader."
@@ -344,21 +435,19 @@
   :args (s/cat :state map?)
   :ret map?)
 
+(defn sleep
+  "Causes execution to block for the specified number of milliseconds plus the
+  optionally specified number of nanoseconds.
+
+  millis should not be negative and nanos should be in the range 0–999999"
+  ([millis] (sleep millis 0))
+  ([millis nanos] (js/PLANCK_SLEEP millis nanos)))
+
+(s/fdef sleep
+  :args (s/alt :unary (s/cat :millis #(and (integer? %) (not (neg? %))))
+               :binary (s/cat :millis #(and (integer? %) (not (neg? %))) :nanos #(and (integer? %) (<= 0 % 999999)))))
+
 ;; Ensure planck.io and planck.http are loaded so that their
 ;; facilities are available
 (repl/side-load-ns 'planck.http)
 (repl/side-load-ns 'planck.io)
-
-(repl/register-speced-vars
-  `exit
-  `read-line
-  `line-seq
-  `read-password
-  `file-seq
-  `slurp
-  `spit
-  `eval
-  `ns-resolve
-  `resolve
-  `intern
-  `init-empty-state)

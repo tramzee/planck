@@ -232,16 +232,20 @@ $PLANCK <<REPL_INPUT
 (defmacro somemacro [])
 (in-ns 'cljs.user)
 (dir foo.bar)
+(require '[clojure.walk :as walk])
+(dir walk)
 REPL_INPUT
 
-echo "Test doc special"
+echo "Test doc"
 $PLANCK -c $SRC <<REPL_INPUT
 (doc bogus)
 (doc inc)
 (doc when)
 (doc if)
 (doc catch)
+(doc ns-resolve)
 (doc doc)
+(doc planck.repl/doc)
 (doc fn) ; macro with :forms
 (doc IWriter)
 (defn f "docstring" [param])
@@ -257,6 +261,9 @@ $PLANCK -c $SRC <<REPL_INPUT
 (source bogus)
 (source inc)
 (source when)
+(source ns-resolve)
+(source doc)
+(source planck.repl/doc)
 (require '[test-doc-source.core :as tds])
 (source test-doc-source.core/my-function)
 (source tds/my-function)
@@ -567,6 +574,10 @@ echo "Test binding of *command-line-args* in file run from command line"
 $PLANCK $SRC/test_args/args_in_file.cljs here are some args
 echo $?
 
+echo "Test binding of *command-line-args* in file run from command line, passing through short opts"
+$PLANCK $SRC/test_args/args_in_file.cljs here -f are -k some -sL args
+echo $?
+
 echo "Test classpath"
 $PLANCK -c $SRC:${SRC}2 <<REPL_INPUT
 (require 'test-src-paths.core)
@@ -734,4 +745,26 @@ $PLANCK <<REPL_INPUT
 (require '[cljs.nodejs :as nodejs])
 (nodejs/enable-util-print!)
 (println "hi")
+REPL_INPUT
+
+echo "Test get-arglist"
+$PLANCK <<REPL_INPUT
+(ns foo.core)
+(defn fun [arg1 arg2] (+ arg1 arg2))
+(planck.repl/get-arglists "fun")
+(planck.repl/get-arglists "reduce")
+REPL_INPUT
+
+echo "Test in 'a' namespace"
+$PLANCK <<REPL_INPUT
+(ns a.core)
+(def a 3)
+a
+REPL_INPUT
+
+echo "Forms should be evaluated in global scope"
+$PLANCK <<REPL_INPUT
+(= js/global (js-this))
+js/source
+js/a
 REPL_INPUT

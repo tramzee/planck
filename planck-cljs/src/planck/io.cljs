@@ -108,18 +108,6 @@
   (when (bad-file-descriptor? file-descriptor)
     (throw (ex-info "Failed to open file." {:file file, :opts opts}))))
 
-(defn- make-string-reader
-  [s]
-  (let [content (atom s)]
-    (letfn [(read [] (let [return @content]
-                       (reset! content nil)
-                       return))]
-      (planck.core/->BufferedReader
-        read
-        (fn [])
-        (atom nil)
-        (atom 0)))))
-
 (defn- make-jar-uri-reader
   [jar-uri opts]
   (let [file-uri (Uri. (.getPath jar-uri))]
@@ -127,7 +115,7 @@
       (let [[file-path resource] (string/split (.getPath file-uri) #"!/")
             [content error-msg] (js/PLANCK_LOAD_FROM_JAR file-path resource)]
         (if-not (nil? content)
-          (make-string-reader content)
+          (planck.core/make-string-reader content)
           (throw (ex-info (str "Failed to extract resource from JAR: " error-msg)
                    {:uri       jar-uri
                     :jar-file  file-path
@@ -141,15 +129,15 @@
   [bundle-uri opts]
   (let [path    (.getPath bundle-uri)
         content (first (js/PLANCK_LOAD path))]
-    (make-string-reader content)))
+    (planck.core/make-string-reader content)))
 
 (defn- make-http-uri-reader
   [uri opts]
-  (make-string-reader (:body (http/get (str uri) {}))))
+  (planck.core/make-string-reader (:body (http/get (str uri) {}))))
 
 (defn- make-http-uri-writer
   [uri opts]
-  (planck.core/->Writer
+  (planck.core/make-raw-writer
     (fn [content]
       (let [name     (or (:param-name opts) "file")
             filename (or (:filename opts) "file.pnk")]
@@ -174,7 +162,7 @@
     (let [file-descriptor (js/PLANCK_FILE_READER_OPEN (:path file) (:encoding opts))]
       (check-file-descriptor file-descriptor file opts)
       (swap! open-file-reader-descriptors conj file-descriptor)
-      (planck.core/->BufferedReader
+      (planck.core/make-raw-pushback-reader
         (fn []
           (if (contains? @open-file-reader-descriptors file-descriptor)
             (let [[result err] (js/PLANCK_FILE_READER_READ file-descriptor)]
@@ -192,7 +180,7 @@
     (let [file-descriptor (js/PLANCK_FILE_WRITER_OPEN (:path file) (boolean (:append opts)) (:encoding opts))]
       (check-file-descriptor file-descriptor file opts)
       (swap! open-file-writer-descriptors conj file-descriptor)
-      (planck.core/->Writer
+      (planck.core/make-raw-writer
         (fn [s]
           (if (contains? @open-file-writer-descriptors file-descriptor)
             (if-let [err (js/PLANCK_FILE_WRITER_WRITE file-descriptor s)]
@@ -213,7 +201,7 @@
     (let [file-descriptor (js/PLANCK_FILE_INPUT_STREAM_OPEN (:path file))]
       (check-file-descriptor file-descriptor file opts)
       (swap! open-file-input-stream-descriptors conj file-descriptor)
-      (planck.core/->InputStream
+      (planck.core/make-raw-input-stream
         (fn []
           (if (contains? @open-file-input-stream-descriptors file-descriptor)
             (js->clj (js/PLANCK_FILE_INPUT_STREAM_READ file-descriptor))
@@ -226,7 +214,7 @@
     (let [file-descriptor (js/PLANCK_FILE_OUTPUT_STREAM_OPEN (:path file) (boolean (:append opts)))]
       (check-file-descriptor file-descriptor file opts)
       (swap! open-file-output-stream-descriptors conj file-descriptor)
-      (planck.core/->OutputStream
+      (planck.core/make-raw-output-stream
         (fn [byte-array]
           (if (contains? @open-file-output-stream-descriptors file-descriptor)
             (js/PLANCK_FILE_OUTPUT_STREAM_WRITE file-descriptor (clj->js byte-array))
@@ -273,7 +261,7 @@
       (throw (ex-info (str "Can't make an output stream from " x) {})))))
 
 (defn reader
-  "Attempts to coerce its argument into an open IBufferedReader."
+  "Attempts to coerce its argument into an open IPushbackReader."
   [x & opts]
   (make-reader x (when opts (apply hash-map opts))))
 
@@ -370,12 +358,3 @@
 (set! planck.core/*writer-fn* writer)
 (set! planck.core/*as-file-fn* as-file)
 (set! planck.core/*file?-fn* file?)
-
-(repl/register-speced-vars
-  `build-uri
-  `file?
-  `file
-  `file-attributes
-  `delete-file
-  `directory?
-  `resource)

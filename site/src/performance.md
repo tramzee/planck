@@ -40,7 +40,7 @@ The caching mechanism works whether your are running `planck` to execute a scrip
 Planck uses a (naïve) file timestamp mechanism to know if cache files are stale, and it additionally looks at comments like the following
 
 ```
-// Compiled by ClojureScript 1.9.908 {:static-fns true, :elide-asserts true}
+// Compiled by ClojureScript 1.9.946 {:static-fns true, :elide-asserts true}
 ```
 
 in the compiled JavaScript to see if the files are applicable. If a file can’t be used, it is replaced with an updated copy.
@@ -49,7 +49,9 @@ Planck's cache invalidation strategy is _naïve_ because it doesn’t attempt to
 
 > Planck's caching mechanism is compatible with the static function dispatch and assert mechanisms described below. In short, if you have cached code that does not match the current settings for static functions or asserts, then it will not be eligible for loading and will be replaced with freshly-compiled JavaScript as needed. 
 
-### Static Dispatch
+### Function Dispatch
+
+#### :static-fns
 
 Planck supports the `:static-fns` ClojureScript compiler option via the `-s` or `-​-​static-fns` command-line flag.
 
@@ -75,10 +77,15 @@ David Nolen [commented](https://groups.google.com/forum/m/#!msg/clojurescript/ho
 
 In short, enabling it can lead to performance benefits, being more amenable to inlining, _etc._, but usually you want to leave it turned off during dev.
 
-And—importantly for Planck—it can be used to work around a particularly severe JavaScriptCore perf [bug](http://dev.clojure.org/jira/browse/CLJS-910) that you can encounter when evaluating the JavaScript generated for lengthy literal list forms.
+#### :fn-invoke-direct
 
-### Closure Optimizations
+Even with `:static-fns` enabled, unknown higher-order functions will be called using the `call` construct described above. You can additionally pass the `-f` or `-​-​fn-invoke-direct` command-line flag to enable the `:fn-invoke-direct` ClojureScript compiler option, which causes such functions to instead be called directly.
 
+An illustrative example is the code emitted for `(defn f [g x] (g x))`. With `:static-fns` disabled, `g.call(null,x)` is emitted for the function body. With `:static-fns` enabled, the emitted code will test determining if `g` is associated with a single-arity static dispatch implementation, and if so, call it, otherwise falling back to `g.call(null,x)`. But, with `:fn-invoke-direct`, the fallback branch will instead involve a direct call `g(x)`.
+
+### Optimizations
+
+#### Closure
 You can specify the Closure compiler level to be applied to source loaded from namespaces by using `-O` or `-​-optimizations`. The allowed values are `none`, `whitespace`, and `simple`. (Planck doesn't support whole-program optimization, so `advanced` is not an option.)
 
 Consider this example:
@@ -94,6 +101,10 @@ When the `require` form above is evaluated, the ClojureScript code is first tran
 Furthermore, if you have caching enabled (the `-K` option above), then code is cached with the optimization level specified. If you later run Planck with a different optimization level, cached code will be invalided and re-compiled at the new optimization level.
 
 While enabling caching is not required, using optimizations and caching together makes sense, given that Closure optimization can take a bit of time to apply.
+
+#### Foreign Libs
+
+If optimizations is set to `simple`, Planck will use `:file-min` in preference to `:file` when loading foreign lib dependencies. (See the Dependencies section of this guide for more information on loading foreign lib dependencies.)
 
 ### Removing Asserts
 

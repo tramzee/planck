@@ -5,43 +5,24 @@
 On Ubuntu, clone and then make a sources archive that includes all necessary JARs.
 
 0. `ssh` to Ubuntu build box.
+0. `curl -O https://download.clojure.org/install/linux-install-1.9.0.315.sh`
+0. `chmod +x linux-install-1.9.0.315.sh`
+0. `sudo ./linux-install-1.9.0.315.sh`
 0. `git clone https://github.com/mfikes/planck`
 0. `cd planck`
-0. `script/build-sandbox`
-0. `cp ~/.lein/self-installs/leiningen-2.7.1-standalone.jar planck-cljs/sandbox-m2`
+0. `cp /usr/local/bin/clojure planck-cljs/script`
+0. `cp /usr/local/lib/clojure/deps.edn planck-cljs/script`
+0. `cp -r /usr/local/lib/clojure/libexec planck-cljs/script/libexec`
+0. Edit `planck-cljs/script/clojure` and revise `install_dir` to be `script`
+0. `FAST_BUILD=1 script/build-sandbox`
 0. `BUILD_PPA=1 script/clean`
 0. `cd ..`
-0. `tar cvzf planck_2.0.0.orig.tar.gz planck`
+0. `tar cvzf planck_2.<x>.<y>.orig.tar.gz planck`
 
-## Update PPA Build Files
+## Configure PPA Build Files
 
-0. Update `debian/control` and `debian/changelog`
-
-Update the `Build Depends` and `Depends` lines.
-
-If building for trusty:
-
-```
-Build-Depends: git, cmake, default-jdk, clang, pkg-config, vim-common, libjavascriptcoregtk-3.0-dev, libglib2.0-dev, libzip-dev, libcurl4-gnutls-dev, libicu-dev
-Depends: libjavascriptcoregtk-3.0-bin, libzip2, libicu52
-```
-
-If building for xenial:
-
-```
-Build-Depends: git, cmake, default-jdk, clang, pkg-config, vim-common, libjavascriptcoregtk-4.0-dev, libglib2.0-dev, libzip-dev, libcurl4-gnutls-dev, libicu-dev
-Depends: libjavascriptcoregtk-4.0-bin, libzip4, libicu55
-```
-
-If building for zesty:
-
-```
-Build-Depends: git, cmake, default-jdk, clang, pkg-config, vim-common, libjavascriptcoregtk-4.0-dev, libglib2.0-dev, libzip-dev, libcurl4-gnutls-dev, libicu-dev
-Depends: libjavascriptcoregtk-4.0-bin, libzip4, libicu57
-```
-
-Set the version numbers in `debian/changelog` appropriately (reflecting the distro as well) and add a changelog line entry.
-
+0. For a given Ubuntu release, copy `debian/control.<ubuntu-release>` and `debian/changelog.<ubuntu-release>` to unsuffixed versions.
+0. Set the `2.<x>.<y>` version number in `debian/changelog` appropriately.
 
 ## Create Build
 
@@ -51,4 +32,4 @@ Set the version numbers in `debian/changelog` appropriately (reflecting the dist
 ## Upload Build
 
 0. `cd` to the top
-0. `dput ppa:mfikes/planck planck_2.0.0-1ppa1~trusty1_source.changes`
+0. `dput ppa:mfikes/planck planck_2.<x>.<y>-1ppa1~<ubuntu-release>1_source.changes`

@@ -214,6 +214,7 @@ void init_classpath(char *classpath) {
         config.num_src_paths += 1;
         config.src_paths = realloc(config.src_paths, config.num_src_paths * sizeof(struct src_path));
         config.src_paths[config.num_src_paths - 1].type = type;
+        config.src_paths[config.num_src_paths - 1].archive = NULL;
         config.src_paths[config.num_src_paths - 1].blacklisted = false;
         if (strcmp(type, "jar") == 0) {
             config.src_paths[config.num_src_paths - 1].path = fully_qualify(cwd, source);
@@ -272,9 +273,69 @@ void dump_sdk(char* target_path) {
     }
 }
 
+bool should_ignore_arg(const char *opt) {
+    if (opt[0] != '-') {
+        return false;
+    }
+
+    // safely ignore any long opt
+    if (opt[1] == '-') {
+        return true;
+    }
+
+    // opt is a short opt or clump of short opts. If the clump
+    // ends with i, e, m, c, n, k, t, S, A, O, D, or L
+    // then this opt takes an argument.
+    int idx = 0;
+    char c = 0;
+    char last_c = 0;
+    while ((c = opt[idx]) != '\0') {
+        last_c = c;
+        idx++;
+    }
+
+    return (last_c == 'i' ||
+            last_c == 'e' ||
+            last_c == 'm' ||
+            last_c == 'c' ||
+            last_c == 'n' ||
+            last_c == 'k' ||
+            last_c == 't' ||
+            last_c == 'S' ||
+            last_c == 'A' ||
+            last_c == 'O' ||
+            last_c == 'D' ||
+            last_c == 'L');
+}
+
 int main(int argc, char **argv) {
 
     ignore_sigpipe();
+
+    // A bare hyphen or a script path not preceded by -[iems] are the two types of mainopt not detected
+    // by getopt_long(). If one of those two things is found, everything afterward is a *command-line-args* arg.
+    // If neither is found, then the first mainopt will be found with getopt_long, and *command-line-args* args
+    // will begin at optind + 1.
+
+    int index_of_script_path_or_hyphen = argc;
+
+    int i;
+    for (i = 1; i < argc; i++) {
+        char* arg = argv[i];
+
+        if (strcmp("-", arg) == 0) {
+            // A bare dash means "run a script from standard input." Bind everything after the dash to *command-line-args*.
+            index_of_script_path_or_hyphen = i;
+            break;
+        } else if (arg[0] != '-') {
+            // This could be a script path. If it is, bind everything after the path to *command-line-args*.
+            char* previous_opt = argv[i - 1];
+            if (!should_ignore_arg(previous_opt)) {
+                index_of_script_path_or_hyphen = i;
+                break;
+            }
+        }
+    }
 
     config.verbose = false;
     config.quiet = false;
@@ -338,8 +399,10 @@ int main(int argc, char **argv) {
     };
     int opt, option_index;
     bool did_encounter_main_opt = false;
+    // pass index_of_script_path_or_hyphen instead of argc to guarantee that everything
+    // after a bare dash "-" or a script path gets passed as *command-line-args*
     while (!did_encounter_main_opt &&
-           (opt = getopt_long(argc, argv, "O:Xh?VS:D:L:lvrA:sfak:je:t:n:dc:o:Ki:qm:", long_options, &option_index)) != -1) {
+           (opt = getopt_long(index_of_script_path_or_hyphen, argv, "O:Xh?VS:D:L:lvrA:sfak:je:t:n:dc:o:Ki:qm:", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'X':
                 init_launch_timing();
@@ -506,8 +569,9 @@ int main(int argc, char **argv) {
         }
     }
 
-    init_classpath(classpath);
-
+    if (classpath) {
+        init_classpath(classpath);
+    }
 
     if (config.num_src_paths == 0) {
         char *classpath = getenv("PLANCK_CLASSPATH");
@@ -559,8 +623,7 @@ int main(int argc, char **argv) {
     engine_init();
 
     // Process init arguments
-
-    int i;
+    
     for (i = 0; i < config.num_scripts; i++) {
         struct script script = config.scripts[i];
         evaluate_source(script.type, script.source, script.expression, false, NULL, config.theme, true, 0);

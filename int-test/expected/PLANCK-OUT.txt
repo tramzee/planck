@@ -123,7 +123,16 @@ macro-crazy
 somemacro
 xfirst
 nil
-Test doc special
+nil
+keywordize-keys
+postwalk
+postwalk-replace
+prewalk
+prewalk-replace
+stringify-keys
+walk
+nil
+Test doc
 nil
 -------------------------
 cljs.core/inc
@@ -155,6 +164,13 @@ Special Form
   Catches and handles JavaScript exceptions.
 
   Please see http://clojure.org/special_forms#try
+nil
+nil
+-------------------------
+planck.repl/doc
+([sym])
+Macro
+  Prints documentation for a var or special form given its name
 nil
 -------------------------
 planck.repl/doc
@@ -222,6 +238,18 @@ nil
      "Evaluates test. If logical true, evaluates body in an implicit do."
      [test & body]
      (core/list 'if test (cons 'do body)))
+nil
+Source not found
+nil
+(defmacro doc
+  "Prints documentation for a var or special form given its name"
+  [sym]
+  `(planck.repl/doc* '~sym))
+nil
+(defmacro doc
+  "Prints documentation for a var or special form given its name"
+  [sym]
+  `(planck.repl/doc* '~sym))
 nil
 nil
 (defn my-function
@@ -446,6 +474,10 @@ Test binding of *command-line-args* in file run from command line
 (here are some args)
 (here are some args)
 0
+Test binding of *command-line-args* in file run from command line, passing through short opts
+(here -f are -k some -sL args)
+(here -f are -k some -sL args)
+0
 Test classpath
 nil
 :src
@@ -508,7 +540,7 @@ from sh-async
 Can exit with timer
 start
 nil
-nil
+1
 end
 nil
 Test chained timer and sh-async keeps script going
@@ -540,3 +572,18 @@ nil
 nil
 hi
 nil
+Test get-arglist
+nil
+#'foo.core/fun
+([arg1 arg2])
+([f coll] [f val coll])
+Test in 'a' namespace
+nil
+#'a.core/a
+3
+Forms should be evaluated in global scope
+true
+Can't find variable: source
+
+Can't find variable: a
+

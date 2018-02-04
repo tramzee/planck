@@ -46,6 +46,26 @@ $ script/build
 
 The resulting binary will be `planck-c/build/planck`.
 
+Specify `-fast` to quickly build a development version that skips Closure optimization:
+
+```
+$ script/build -fast
+```
+
+If you specify `-Sdeps`, it will be passed through to the underlying [`clojure`](https://clojure.org/guides/deps_and_cli) command during the build process. This can be used to specify a ClojureScript dep to use.
+
+For example, to build against a specific released version,
+
+```
+$ script/build -Sdeps '{:deps {org.clojure/clojurescript {:mvn/version "1.9.946"}}}'
+```
+
+or to build against a specific commit SHA,
+
+```
+$ script/build -Sdeps '{:deps {org.clojure/clojurescript {:git/url "https://github.com/clojure/clojurescript" :sha "5daa57293dc97f7d1a6abafb5aa977365e286d61"}}'
+```
+
 ## Tests
 
 ```
@@ -55,6 +75,6 @@ $ script/test
 
 # License
 
-Copyright © 2015–2017 Mike Fikes and Contributors
+Copyright © 2015–2018 Mike Fikes and Contributors
 
 Distributed under the Eclipse Public License either version 1.0 or (at your option) any later version.

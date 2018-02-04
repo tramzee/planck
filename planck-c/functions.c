@@ -11,6 +11,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <errno.h>
+#include <time.h>
 
 #include <JavaScriptCore/JavaScript.h>
 
@@ -147,11 +148,22 @@ JSValueRef function_load(JSContextRef ctx, JSObjectRef function, JSObjectRef thi
                     struct stat file_stat;
                     if (stat(location, &file_stat) == 0) {
                         char *error_msg = NULL;
-                        contents = get_contents_zip(location, path, &last_modified, &error_msg);
-                        if (!contents && error_msg) {
-                            engine_print(error_msg);
-                            engine_print("\n");
-                            free(error_msg);
+                        if (!config.src_paths[i].archive) {
+                            config.src_paths[i].archive = open_archive(location, &error_msg);
+                            if (error_msg) {
+                                engine_print(error_msg);
+                                engine_print("\n");
+                                free(error_msg);
+                            }
+                        }
+                        if (config.src_paths[i].archive) {
+                            contents = get_contents_zip(config.src_paths[i].archive, path,
+                                                        &last_modified, &error_msg);
+                            if (!contents && error_msg) {
+                                engine_print(error_msg);
+                                engine_print("\n");
+                                free(error_msg);
+                            }
                         }
                         loaded_type = type;
                         loaded_location = location;
@@ -225,16 +237,27 @@ JSValueRef function_load_deps_cljs_files(JSContextRef ctx, JSObjectRef function,
                 struct stat file_stat;
                 if (stat(location, &file_stat) == 0) {
                     char *error_msg = NULL;
-                    char *source = get_contents_zip(location, deps_cljs_filename, NULL, &error_msg);
-                    if (source != NULL) {
-                        num_files += 1;
-                        deps_cljs_files = realloc(deps_cljs_files, num_files * sizeof(char *));
-                        deps_cljs_files[num_files - 1] = source;
-                    } else {
+                    if (!config.src_paths[i].archive) {
+                        config.src_paths[i].archive = open_archive(location, &error_msg);
                         if (error_msg) {
                             engine_print(error_msg);
                             engine_print("\n");
                             free(error_msg);
+                        }
+                    }
+                    if (config.src_paths[i].archive) {
+                        char *source = get_contents_zip(config.src_paths[i].archive, deps_cljs_filename,
+                                                        NULL, &error_msg);
+                        if (source != NULL) {
+                            num_files += 1;
+                            deps_cljs_files = realloc(deps_cljs_files, num_files * sizeof(char *));
+                            deps_cljs_files[num_files - 1] = source;
+                        } else {
+                            if (error_msg) {
+                                engine_print(error_msg);
+                                engine_print("\n");
+                                free(error_msg);
+                            }
                         }
                     }
                 } else {
@@ -285,16 +308,27 @@ JSValueRef function_load_from_jar(JSContextRef ctx, JSObjectRef function, JSObje
         JSStringGetUTF8CString(resource_path_str, resource_path, PATH_MAX);
         JSStringRelease(resource_path_str);
 
-        char *error_msg = NULL;
-        char *contents = get_contents_zip(jar_path, resource_path, NULL, &error_msg);
-
+        char *contents = NULL;
         JSStringRef contents_str = NULL;
-        if (contents != NULL) {
-            contents_str = JSStringCreateWithUTF8CString(contents);
-            free(contents);
-        } else {
+
+        char *error_msg = NULL;
+        void *archive = open_archive(jar_path, &error_msg);
+        if (!archive) {
             if (!error_msg) {
-                error_msg = strdup("Resource not found in JAR");
+                error_msg = strdup("Failed to open JAR");
+            }
+        } else {
+            contents = get_contents_zip(archive, resource_path, NULL, &error_msg);
+
+            close_archive(archive);
+
+            if (contents != NULL) {
+                contents_str = JSStringCreateWithUTF8CString(contents);
+                free(contents);
+            } else {
+                if (!error_msg) {
+                    error_msg = strdup("Resource not found in JAR");
+                }
             }
         }
 
@@ -1079,29 +1113,12 @@ JSValueRef function_read_password(JSContextRef ctx, JSObjectRef function, JSObje
     return JSValueMakeNull(ctx);
 }
 
-struct timeout_data_t {
-    unsigned long long id;
-};
-
-char *timeout_id_to_str(unsigned long long id) {
-    char *rv = malloc(21);
-    sprintf(rv, "%llu", id);
-    return rv;
-};
-
-JSValueRef timeout_data_to_js_value(JSContextRef ctx, struct timeout_data_t *timeout_data) {
-    char *id_str = timeout_id_to_str(timeout_data->id);
-    JSValueRef rv = c_string_to_value(ctx, id_str);
-    free(id_str);
-    return rv;
-}
-
 void do_run_timeout(void *data) {
 
-    struct timeout_data_t *timeout_data = data;
+    unsigned long *timeout_data = data;
 
     JSValueRef args[1];
-    args[0] = timeout_data_to_js_value(ctx, timeout_data);
+    args[0] = JSValueMakeNumber(ctx, (double)*timeout_data);
     free(timeout_data);
 
     static JSObjectRef run_timeout_fn = NULL;
@@ -1114,7 +1131,7 @@ void do_run_timeout(void *data) {
     release_eval_lock();
 }
 
-static unsigned long long timeout_id = 0;
+static unsigned long timeout_id = 0;
 
 JSValueRef function_set_timeout(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
                                 size_t argc, const JSValueRef args[], JSValueRef *exception) {
@@ -1123,11 +1140,70 @@ JSValueRef function_set_timeout(JSContextRef ctx, JSObjectRef function, JSObject
 
         int millis = (int) JSValueToNumber(ctx, args[0], NULL);
 
-        struct timeout_data_t *timeout_data = malloc(sizeof(struct timeout_data_t));
-        timeout_data->id = ++timeout_id;
-        JSValueRef rv = timeout_data_to_js_value(ctx, timeout_data);
+        if (timeout_id == 9007199254740991) {
+            timeout_id = 0;
+        } else {
+            ++timeout_id;
+        }
+
+        JSValueRef rv = JSValueMakeNumber(ctx, (double)timeout_id);
+
+        unsigned long *timeout_data = malloc(sizeof(unsigned long));
+        *timeout_data = timeout_id;
 
         start_timer(millis, do_run_timeout, (void *) timeout_data);
+
+        return rv;
+    }
+    return JSValueMakeNull(ctx);
+}
+
+void do_run_interval(void *data) {
+
+    unsigned long *interval_data = data;
+
+    JSValueRef args[1];
+    args[0] = JSValueMakeNumber(ctx, (double)*interval_data);
+    free(interval_data);
+
+    static JSObjectRef run_interval_fn = NULL;
+    if (!run_interval_fn) {
+        run_interval_fn = get_function("global", "PLANCK_RUN_INTERVAL");
+        JSValueProtect(ctx, run_interval_fn);
+    }
+    acquire_eval_lock();
+    JSObjectCallAsFunction(ctx, run_interval_fn, NULL, 1, args, NULL);
+    release_eval_lock();
+}
+
+static unsigned long interval_id = 0;
+
+JSValueRef function_set_interval(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                 size_t argc, const JSValueRef args[], JSValueRef *exception) {
+    if (argc == 2
+        && JSValueGetType(ctx, args[0]) == kJSTypeNumber) {
+
+        int millis = (int) JSValueToNumber(ctx, args[0], NULL);
+
+        unsigned long curr_interval_id;
+
+        if (JSValueIsNull(ctx, args[1])) {
+            if (interval_id == 9007199254740991) {
+                interval_id = 0;
+            } else {
+                ++interval_id;
+            }
+            curr_interval_id = interval_id;
+        } else {
+            curr_interval_id = (unsigned long) JSValueToNumber(ctx, args[1], NULL);
+        }
+
+        JSValueRef rv = JSValueMakeNumber(ctx, (double)curr_interval_id);
+
+        unsigned long *interval_data = malloc(sizeof(unsigned long));
+        *interval_data = curr_interval_id;
+
+        start_timer(millis, do_run_interval, (void *) interval_data);
 
         return rv;
     }
@@ -1292,6 +1368,29 @@ JSValueRef function_socket_close(JSContextRef ctx, JSObjectRef function, JSObjec
             JSValueRef arguments[1];
             arguments[0] = c_string_to_value(ctx, strerror(errno));
             *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+        }
+    }
+    return JSValueMakeNull(ctx);
+}
+
+JSValueRef function_sleep(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                          size_t argc, const JSValueRef args[], JSValueRef *exception) {
+    if (argc == 2
+        && JSValueGetType(ctx, args[0]) == kJSTypeNumber
+        && JSValueGetType(ctx, args[1]) == kJSTypeNumber) {
+
+        int millis = (int) JSValueToNumber(ctx, args[0], NULL);
+        int nanos = (int) JSValueToNumber(ctx, args[1], NULL);
+
+        struct timespec t;
+        t.tv_sec = millis / 1000;
+        t.tv_nsec = 1000 * 1000 * (millis % 1000) + nanos;
+        
+        if (t.tv_sec != 0 || t.tv_nsec != 0) {
+            int err = nanosleep(&t, NULL);
+            if (err) {
+                engine_perror("sleep");
+            }
         }
     }
     return JSValueMakeNull(ctx);

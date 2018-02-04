@@ -3,11 +3,90 @@ All notable changes to this project will be documented in this file. This change
 
 ## [Unreleased]
 ### Added
+- Support `js/clearTimeout`, `js/setInterval`, and `js/clearInterval` ([#127](https://github.com/mfikes/planck/issues/597))
+
+### Changed
+- Use `clojure` / `deps.edn` instead of `lein` / `project.clj` when building
+- Tweaks to build process supporting depending on a ClojureScript source tree (instead of JAR)
+
+## [2.11.0] - 2018-01-23
+### Added
+- Add `M-f`, `M-b`, and `M-d` support for REPL ([#569](https://github.com/mfikes/planck/issues/569))
+- Add support for core.specs.alpha ([#592](https://github.com/mfikes/planck/issues/592))
+- HTTP facility supports UNIX sockets ([#597](https://github.com/mfikes/planck/issues/597))
+- Update Dependencies page showing how to use deps.edn ([#575](https://github.com/mfikes/planck/issues/575))
+
+### Changed
+- Use Clojure 1.9.0 when building Planck
+- Use FindCurl when building Planck ([#598](https://github.com/mfikes/planck/issues/598))
+
+### Fixed
+- `with-sh-env` codepath subjects `env` to spec validation ([#565](https://github.com/mfikes/planck/issues/565))
+- Improve perf of loading resources from JARs ([#566](https://github.com/mfikes/planck/issues/566))
+- Update site docs for tab completion ([#545](https://github.com/mfikes/planck/issues/545))
+- Auto-completion fails with numbers in ns names ([#578](https://github.com/mfikes/planck/issues/578))
+- Terminal size changes not detected until line entered ([#584](https://github.com/mfikes/planck/issues/584))
+- Odd jump if you paste long line ([#459](https://github.com/mfikes/planck/issues/459))
+- Don't use sequence to print eduction ([#590](https://github.com/mfikes/planck/issues/590))
+- Can't make trivial revisions to `function_http_request` without `SIGSEGV`s ([#600](https://github.com/mfikes/planck/issues/600))
+
+## [2.10.0] - 2017-12-07
+### Added
+- Site docs for `--fn-invoke-direct` ([#547](https://github.com/mfikes/planck/issues/547))
+- Implement http put, patch, delete, head ([#548](https://github.com/mfikes/planck/issues/548))
+- Make `dir` work on aliases ([#552](https://github.com/mfikes/planck/issues/552))
+- Add `planck.core/sleep` ([#558](https://github.com/mfikes/planck/issues/558))
+- Add `planck.core/read` ([#560](https://github.com/mfikes/planck/issues/560))
+- Add `planck.core/read-string` ([#559](https://github.com/mfikes/planck/issues/559))
+
+### Changed
+- Update build to use Lein 2.8.1
+- Eliminate doc site reference to `:static-fns` as a workaround for (fixed) JavaScriptCore perf bug.
+- Update to Closure v20170910
+- Update build to allow alternate `xxd -i` implementation ([#549](https://github.com/mfikes/planck/issues/549))
+- Update doc site to reflect that `cljs.core/*command-line-args*` is populated.
+- Update doc site Dependencies Foreign Libs CLJSJS section to use `boot`
+- Use `:foreign-libs` `:file-min` if optimizations `simple` ([#555](https://github.com/mfikes/planck/issues/555))
+
+### Removed
+- Remove `planck.core` types meant to be private ([#562](https://github.com/mfikes/planck/issues/562))
+
+### Fixed
+- Single-dash command line args not passed to script ([#550](https://github.com/mfikes/planck/issues/550))
+- `this` bound to `planck.repl` when foreign lib loaded ([#554](https://github.com/mfikes/planck/issues/554))
+- Auto-complete for referred Vars ([#556](https://github.com/mfikes/planck/issues/556))
+- Clear EOF after reading file so subsequent read calls will see any appended data ([#557](https://github.com/mfikes/planck/issues/557))
+- `source` fails on Vars whose source has ns-aliased keywords ([#561](https://github.com/mfikes/planck/issues/561))
+
+## [2.9.0] - 2017-11-14
+### Changed
+- transit-cljs 0.8.243
+- Show completion candidates when hitting tab ([#527](https://github.com/mfikes/planck/issues/527))
+- Remove `planck.repl/get-arglists` spec (it is non-user supplied and present by default)
+
+### Fixed
+- Fix issue where source/doc would work on private planck.repl Vars ([#542](https://github.com/mfikes/planck/issues/542))
+- Fix issue where global a/b/c shadowed by locals ([#543](https://github.com/mfikes/planck/issues/543))
+- Eliminate stale reference to `coercible-file?` spec ([#544](https://github.com/mfikes/planck/issues/544))
+
+## [2.8.1] - 2017-10-03
+### Fixed
+- Fix Linux PPA build issue with build box home dir
+
+## [2.8.0] - 2017-10-03
+### Added
 - Optimizations for source map loading when first exception is printed.
 - Honor `cljs.core/*main-cli-fn*`, calling if set.
+- Facsimile of `cljs.nodejs` for code calling `enable-util-print!`.
+
+### Changed
+- ClojureScript 1.9.946.
 
 ### Fixed
 - Eliminate leaks and properly initialize memory.
+- `planck.repl/get-arglists` now resolves symbols in current namespace.
+- It is now possible to require `goog`.
+- Fix SIGSEGV with glibc 2.26.
 
 ## [2.7.3] - 2017-08-17
 ### Fixed
@@ -341,7 +420,7 @@ All notable changes to this project will be documented in this file. This change
 ### Added
 - A quiet mode that disables banner and other output.
 - Support for `clojure.core.reducers`.
-- Ability to use `cljs.js` itself within Plank via `planck.core/init-empty-state`.
+- Ability to use `cljs.js` itself within Planck via `planck.core/init-empty-state`.
 - Autocompletion on commonly used keywords and other autocomplete improvements.
 
 ### Changed
@@ -539,7 +618,12 @@ All notable changes to this project will be documented in this file. This change
 ### Added
 - Initial release.
 
-[Unreleased]: https://github.com/mfikes/planck/compare/2.7.3...HEAD
+[Unreleased]: https://github.com/mfikes/planck/compare/2.11.0...HEAD
+[2.11.0]: https://github.com/mfikes/planck/compare/2.10.0...2.11.0
+[2.10.0]: https://github.com/mfikes/planck/compare/2.9.0...2.10.0
+[2.9.0]: https://github.com/mfikes/planck/compare/2.8.1...2.9.0
+[2.8.1]: https://github.com/mfikes/planck/compare/2.8.0...2.8.1
+[2.8.0]: https://github.com/mfikes/planck/compare/2.7.3...2.8.0
 [2.7.3]: https://github.com/mfikes/planck/compare/2.7.0...2.7.3
 [2.7.0]: https://github.com/mfikes/planck/compare/2.6.0...2.7.0
 [2.6.0]: https://github.com/mfikes/planck/compare/2.5.0...2.6.0

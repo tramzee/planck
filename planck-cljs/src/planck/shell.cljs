@@ -6,7 +6,7 @@
    [cljs.spec.alpha :as s]
    [clojure.string]
    [goog.object :as gobj]
-   [planck.io :refer [as-file]]
+   [planck.io :as io :refer [as-file]]
    [planck.repl :as repl]))
 
 (def ^:dynamic *sh-dir* nil)
@@ -36,6 +36,8 @@
   (let [{:keys [cmd opts cb]} (s/conform ::sh-async-args args)]
     (when (nil? cmd)
       (throw (s/explain ::sh-async-args args)))
+    (when-not (s/valid? (s/nilable ::string-string-map?) *sh-env*)
+      (throw (js/Error. (s/explain-str ::string-string-map? *sh-env*))))
     (let [{:keys [in in-enc out-enc env dir]}
           (merge {:out-enc nil :in-enc nil :dir (and *sh-dir* [:sh-dir *sh-dir*]) :env *sh-env*}
             (into {} (map (comp (juxt :key :val) second) opts)))
@@ -118,7 +120,7 @@
   (s/alt :in (s/cat :key #{:in} :val string?)
     :in-enc (s/cat :key #{:in-enc} :val string?)
     :out-enc (s/cat :key #{:out-enc} :val string?)
-    :dir (s/cat :key #{:dir} :val :planck.io/coercible-file?)
+    :dir (s/cat :key #{:dir} :val (s/or :string string? :file io/file?))
     :env (s/cat :key #{:env} :val ::string-string-map?)))
 
 (s/def ::sh-args (s/cat :cmd (s/+ string?) :opts (s/* ::sh-opt)))
@@ -135,7 +137,3 @@
 (s/fdef sh-async
   :args ::sh-async-args
   :ret nil?)
-
-(repl/register-speced-vars
-  `sh
-  `sh-async)
