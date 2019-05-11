@@ -57,13 +57,29 @@
 
 (planck.core/intern 'foo.core 'a 3)
 (planck.core/intern 'foo.core (with-meta 'b {:alpha 17}) 12)
-(planck.core/intern (find-ns 'foo.core) 'd 18)
+(planck.core/intern (find-ns 'foo.core) 'c 18)
+(planck.core/intern 'foo.core 'd 'bar)
+(planck.core/intern 'foo.core 'e '[bar])
 
 (deftest test-intern
-  (is (= 4 (count (planck.core/eval '(ns-interns (quote foo.core))))))
+  (is (= 6 (count (planck.core/eval '(ns-interns (quote foo.core))))))
   (is (= 12 @(planck.core/ns-resolve 'foo.core 'b)))
   (is (= 17 (:alpha (meta (planck.core/ns-resolve 'foo.core 'b)))))
-  (is (= 18 @(planck.core/ns-resolve 'foo.core 'd))))
+  (is (= 18 @(planck.core/ns-resolve 'foo.core 'c)))
+  (is (= 'bar @(planck.core/ns-resolve 'foo.core 'd)))
+  (is (= '[bar] @(planck.core/ns-resolve 'foo.core 'e))))
+
+(deftest test-ns-aliases
+  (is (= '{string clojure.string, set clojure.set}
+        (into {} (map (fn [[k v]] [k (ns-name v)])) (planck.core/ns-aliases 'foo.core))))
+  (is (thrown? js/Error (planck.core/ns-aliases 'unknown.namespace))))
+
+(deftest test-ns-refers
+  (let [refers (planck.core/ns-refers 'foo.core)]
+    (is (= ['union #'clojure.set/union] (find refers 'union)))
+    (is (= ['intersection #'clojure.set/intersection] (find refers 'intersection)))
+    (is (= ['reduce #'cljs.core/reduce] (find refers 'reduce)))
+    (is (not (contains? refers 'map)))))
 
 (defn spit-slurp [file-name content]
   (planck.core/spit file-name content)
@@ -88,7 +104,7 @@
       (is (= '(2 3 4) value)))))
 
 (deftest slurp-url-test
-  (is (string/includes? (planck.core/slurp "http://planck-repl.org") "Planck")))
+  (is (string/includes? (planck.core/slurp "https://planck-repl.org") "Planck")))
 
 (deftest slurp-from-jar-test
   (is (= "(ns test-jar.core)\n\n(def x \"Hello, from JAR\")\n"
@@ -111,7 +127,7 @@
                                     4 nil)]
                            (vswap! read-count inc)
                            rv)
-        buffered-reader (planck.core/make-raw-pushback-reader raw-read #() (atom nil) (atom 0))]
+        buffered-reader (#'planck.core/->Reader raw-read #() (atom nil) (atom 0))]
     (is (= "abc" (planck.core/-read-line buffered-reader)))
     (is (= "def" (planck.core/-read-line buffered-reader)))
     (is (nil? (planck.core/-read-line buffered-reader)))))
@@ -138,3 +154,22 @@
   (is (= '(+ 1 2) (planck.core/read-string "(+ 1 2))))))")))
   (is (= '(\( \x \y \) \z) (planck.core/read-string "(\\( \\x \\y \\) \\z)")))
   (is (= 11 (planck.core/read-string (str "2r" "1011")))))
+
+(deftest find-var-test
+  (is (nil? (planck.core/find-var 'cljs.core/nonexist)))
+  (is (= #'cljs.core/filter (planck.core/find-var 'cljs.core/filter))))
+
+(deftest load-string-test
+  (is (= 3 (planck.core/load-string "1 2 3")))
+  (is (= "hi" (with-out-str (planck.core/load-string "1 (print \"hi\") 2"))))
+  (is (= :foo.core/x (planck.core/load-string "(ns foo.core) ::x"))))
+
+(deftest load-reader-test
+  (is (= 3 (planck.core/load-reader (#'planck.core/make-string-reader "1 2 3")))))
+
+(deftest requiring-resolve-test
+  (is (nil? (planck.core/resolve 'planck.requiring-resolve-ns/a)))
+  (is (= 3 @(planck.core/requiring-resolve 'planck.requiring-resolve-ns/a))))
+
+(deftest with-in-str-test
+  (is (= "34" (planck.core/with-in-str "34\n35" (planck.core/read-line)))))

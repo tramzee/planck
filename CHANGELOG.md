@@ -3,11 +3,216 @@ All notable changes to this project will be documented in this file. This change
 
 ## [Unreleased]
 ### Added
+- Add `planck.io/tty?` ([#911](https://github.com/planck-repl/planck/issues/911))
+- Add -keep-gcl option to the clean script
+- Ignore `*.swp` files
+
+### Changed
+- Re-enable FTL JIT on macOS ([#820](https://github.com/planck-repl/planck/issues/820))
+- Updated planck-repl.org to use HTTPs and revised all references.
+
+### Fixed
+- Switch `strncpy` to `memcpy` to avoid GCC warning
+- Backslash return return should produce "\n" ([661](https://github.com/planck-repl/planck/issues/661))
+- `-e` affects `*1`, `*2`, `*3` ([#659](https://github.com/planck-repl/planck/issues/659))
+- Print queues properly ([#921](https://github.com/planck-repl/planck/issues/921))
+
+## [2.22.0] - 2019-04-06
+### Added
+- Add `planck.core/with-in-str` ([#873](https://github.com/planck-repl/planck/issues/873))
+- Document `planck.io/resource` ([#487](https://github.com/planck-repl/planck/issues/487))
+- Support `ns-aliases` and `ns-refers` ([#505](https://github.com/planck-repl/planck/issues/505))
+- Add almost all of the Google Closure Library ([#496](https://github.com/planck-repl/planck/issues/496))
+- Bundle official distribution of Google Closure Library
+- Add caching of optimisation files
+
+### Changed
+- Update to Google Closure Library v20190301
+- Update to Google Closure Compiler v20190301
+
+### Fixed
+- Execution error instead of syntax for `08` ([#857](https://github.com/planck-repl/planck/issues/857))
+- Support interning quoted data structues ([#508](https://github.com/planck-repl/planck/issues/508))
+- Fix error messages in `planck.io` ([#582](https://github.com/planck-repl/planck/issues/582))
+- Bad import taints analysis metadata ([#888](https://github.com/planck-repl/planck/issues/888))
+- Long form needed with plk for optimizations / checked arrays ([#750](https://github.com/planck-repl/planck/issues/750))
+- Crash when defining single segment ns ([#588](https://github.com/planck-repl/planck/issues/588))
+- Handle interruptions while nanosleeping ([#909](https://github.com/planck-repl/planck/issues/909))
+
+## [2.21.0] - 2019-03-07
+### Added
+- Add `planck.io/exists?`, `planck.io/hidden-file?`, `planck.io/regular-file?`, `planck.io/symbolic-link?` ([#863](https://github.com/planck-repl/planck/issues/863))
+- Add `planck.io/path-elements`, `planck.io/file-name`
+- Document using Boot to generate a classpath file ([#343](https://github.com/planck-repl/planck/issues/343))
+- Crash with empty HTTP response header ([#894](https://github.com/planck-repl/planck/issues/894))
+
+### Changed
+* Update to ClojureScript 1.10.520
+
+### Fixed
+- Consistent use of 'accept' in `planck.http` ([#837](https://github.com/planck-repl/planck/issues/837))
+- `planck.core/load-string` evaluates in current namespace ([#867](https://github.com/planck-repl/planck/issues/867))
+
+## [2.20.0] - 2019-01-31
+### Added
+- Option to have `planck.http` follow redirects ([#842](https://github.com/mfikes/planck/issues/842))
+- Add `requiring-resolve` ([#835](https://github.com/mfikes/planck/issues/835))
+- Support setting user agent in `planck.http` ([#838](https://github.com/mfikes/planck/issues/838))
+- Bundle new datafy namespace ([#851](https://github.com/mfikes/planck/issues/851))
+- Support for improvements to exception messages and printing in ClojureScript 1.10.516 ([#845](https://github.com/mfikes/planck/issues/845))
+
+### Changed
+- Update to ClojureScript 1.10.516
+- Update to Fipp 0.6.14
+- Syntax-highlight and shorten qualified keywords in default spec explain printer ([#848](https://github.com/mfikes/planck/issues/848))
+
+### Fixed
+- Make s/explain provide names of core fns ([#832](https://github.com/mfikes/planck/issues/832))
+- Analysis cache issue with `load-file` ([#843](https://github.com/mfikes/planck/issues/843))
+- Check for handle undefined values in C code that fetches values from JavaScriptCore
+- Fix `fnil` expression: `0` for `nil` in second position ([#854](https://github.com/mfikes/planck/issues/854))
+- Ensure `cljs.js/require` called with bound vars ([#855](https://github.com/mfikes/planck/issues/855))
+
+
+## [2.19.0] - 2018-11-02
+### Changed
+- Update to ClojureScript 1.10.439
+- Support for `:spec-skip-macros` compiler option ([#806](https://github.com/planck-repl/planck/issues/806))
+- Enhanced `delay` printing ([#827](https://github.com/mfikes/planck/issues/827))
+
+## [2.18.1] - 2018-10-23
+### Changed
+- Pretty-print atoms and volatiles
+
+### Fixed
+- Requiring foreign libs with cljsjs broken ([#825](https://github.com/mfikes/planck/issues/825))
+
+## [2.18.0] - 2018-10-13
+### Added
+- Add support for tagged literals ([#517](https://github.com/mfikes/planck/issues/517))
+- `doc` for spec-registered keywords
+- Support for passing options via `--compile-opts` ([#774](https://github.com/planck-repl/planck/issues/774))
+- Support for `:closure-defines` ([#773](https://github.com/planck-repl/planck/issues/773))
+- Support for `:source-map` compiler option
+- Support for `:warnings` compiler option ([#783](https://github.com/planck-repl/planck/issues/783))
+- Support for `:repl-requires` compiler option ([#786](https://github.com/planck-repl/planck/issues/786))
+- Support for `:def-emits-var` compiler option ([#785](https://github.com/planck-repl/planck/issues/785))
+- Auto-load `user.`(`cljs`|`cljc`) ([#754](https://github.com/planck-repl/planck/issues/754))
+- Allow `planck.shell` `:in` to take same as `io/copy` ([#808](https://github.com/planck-repl/planck/issues/808))
+- Add `find-var` imitation ([#743](https://github.com/planck-repl/planck/issues/743))
+- Add `planck.io/list-files` ([#748](https://github.com/planck-repl/planck/issues/748))
+- Add `planck.core/load-reader` and `planck.core/load-string` ([#687](https://github.com/planck-repl/planck/issues/687))
+
+### Changed
+- Updates for private var use in Planck namespaces
+- Ensure all earmuffed vars defined in Planck namespaces are dynamic
+- Support `IPrintWithWriter` on native types ([#767](https://github.com/planck-repl/planck/issues/767))
+- Use Number.isInteger if possible ([#799](https://github.com/planck-repl/planck/issues/799))
+- Monkey patch target-specific array? and find-ns-obj ([#798](https://github.com/planck-repl/planck/issues/798))
+- Update `test.check` to 0.10.0-alpha3 ([#802](https://github.com/planck-repl/planck/issues/802))
+
+### Fixed
+- Cache behavior when executing standalone script with shebang deps ([#749](https://github.com/mfikes/planck/issues/749))
+- Fix build issue when using `xxdi.pl` ([#770](https://github.com/mfikes/planck/issues/770))
+- Fix loading of Closure libs
+- Trailing comma error with optimizations ([#781](https://github.com/mfikes/planck/issues/781))
+- Log errors when initializing engine ([#787](https://github.com/mfikes/planck/issues/787))
+- Bundle missing macros namespaces ([#794](https://github.com/planck-repl/planck/issues/794))
+- ClojureScript version should not be displayed if there are inits ([#804](https://github.com/planck-repl/planck/issues/804))
+- Docstring for `planck.shell/sh` `:in` should indicate `string` ([#807](https://github.com/planck-repl/planck/issues/807))
+- Faster `array`<->`vec` I/O ([#812](https://github.com/planck-repl/planck/issues/812))
+- Faster `file-seq` ([#816](https://github.com/planck-repl/planck/issues/816))
+
+## [2.17.0] - 2018-07-02
+### Changed
+- Update to ClojureScript 1.10.339
+- Delegate to ClojureScript `deps.edn` for `transit-clj`
+
+### Fixed
+- Crash getting http response via socket REPL ([#760](https://github.com/mfikes/planck/issues/760))
+
+## [2.16.0] - 2018-06-22
+### Changed
+- Update to ClojureScript 1.10.329
+
+## [2.15.0] - 2018-06-15
+### Added
+- Read the environment variables into `planck.environ/env` ([#751](https://github.com/mfikes/planck/issues/751))
+### Changed
+- Update to ClojureScript 1.10.312
+- Update to Closure Compiler v20180610
+- No longer bundle `goog.json.EvalJsonProcessor` in order to support latest Closure Library.
+- Accommodate new Closure Library deps management.
+
+### Fixed
+- If you pass a non-fn to setTimeout it should throw ([#702](https://github.com/mfikes/planck/issues/702))
+
+## [2.14.0] - 2018-05-02
+### Added
+- Document how to use `-Sdeps` in shebang on macOS ([#720](https://github.com/mfikes/planck/issues/720))
+- Man pages for `planck` and `plk` ([#727](https://github.com/mfikes/planck/issues/727))
+- A `script/install` that will install `planck`, `plk`, and man pages ([#728](https://github.com/mfikes/planck/issues/728))
+- Document shutdown semantics ([#723](https://github.com/planck-repl/planck/issues/723))
+
+### Changed
+- Default FTL JIT to off ([#722](https://github.com/mfikes/planck/issues/722))
+- Avoid private var use within Planck code to prepare for [CLJS-1702](https://dev.clojure.org/jira/browse/CLJS-1702)
+- Improve "launch path not accessible" message from `planck.shell/sh` ([#721](https://github.com/mfikes/planck/issues/721))
+
+### Fixed
+- If `exit` called, exit immediately ([#735](https://github.com/mfikes/planck/issues/735))
+- Need to load REPL code when initializing engine ([#737](https://github.com/mfikes/planck/issues/737))
+
+## [2.13.0] - 2018-04-17
+### Added
+- Add a new `plk` script which delegates to `clojure` for `deps.edn`, _etc._ ([#710](https://github.com/mfikes/planck/issues/710))
+- Port `clojure.java.io/copy` ([#677](https://github.com/mfikes/planck/issues/677))
+
+### Fixed
+- `js/clearTimeout` should allow shutdown ([#698](https://github.com/mfikes/planck/issues/698))
+
+### Changed
+- Update to `transit-cljs` 0.8.248 and remove workaround introduced with [#647](https://github.com/mfikes/planck/issues/647)
+- Update to Closure v20180319
+- Update help for `*command-line-args*` ([#615](https://github.com/mfikes/planck/issues/615))
+- On macOS 10.13.4 and later default FTL JIT to off ([#706](https://github.com/planck-repl/planck/issues/706))
+
+## [2.12.6] - 2018-03-26
+### Fixed
+- Fixed issues with building Ubuntu PPA in sandbox environment
+- Fixed implicit definition of `execvpe` when compiling for Linux
+
+## [2.12.0] - 2018-03-25
+### Added
 - Support `js/clearTimeout`, `js/setInterval`, and `js/clearInterval` ([#127](https://github.com/mfikes/planck/issues/597))
+- Add a NixOS 17.09 build environment
+- Include informative message about `-fast` when building ([#587](https://github.com/mfikes/planck/issues/587))
+- Allow HTTP response body to optionally be encoded as binary ([#649](https://github.com/mfikes/planck/issues/649))
+- Added `io/make-parents` ([#470](https://github.com/mfikes/planck/issues/470))
+- Added `io/as-relative-path`
+- Support classpath-relative paths (starting with `@` or `@/`) for `-i` and script paths 
+- Support for insecure http connections ([#694](https://github.com/mfikes/planck/issues/694))
 
 ### Changed
 - Use `clojure` / `deps.edn` instead of `lein` / `project.clj` when building
 - Tweaks to build process supporting depending on a ClojureScript source tree (instead of JAR)
+- Update to Closure v20180204
+- Avoid consequences enable-console-print! in core ([#638](https://github.com/mfikes/planck/issues/638))
+- Truncate stacktraces to stop in user code
+- Use a simpler startup banner matching ClojureScript
+- Update `planck.core/eval` to delegate to the new `cljs.core/eval`
+
+### Fixed
+- In stacktraces, JavaScript sources assumed to be ClojureScript ([#624](https://github.com/mfikes/planck/issues/624))
+- Bundled JavaScript files not source-mapped ([#630](https://github.com/mfikes/planck/issues/630))
+- Fully qualified name lost in stacktrace w/optimization ([#635](https://github.com/mfikes/planck/issues/635))
+- Incorrect stacktrace demunging with hyphens ([#641](https://github.com/mfikes/planck/issues/641))
+- Sometimes async prints missing ([#655](https://github.com/mfikes/planck/issues/655))
+- `clojure.reflect` not bundled ([#667](https://github.com/mfikes/planck/issues/667))
+- Remove unnecessary equals signs between options and parameter values in help output
+- Provide more info if sh err is 126 or 127 ([#673](https://github.com/mfikes/planck/issues/673))
+- Degenerate PATH if any env map supplied to `planck.shell/sh` ([#672](https://github.com/mfikes/planck/issues/672))
+- `io/file` should make use of `io/as-file` internally ([#683](https://github.com/mfikes/planck/issues/683))
 
 ## [2.11.0] - 2018-01-23
 ### Added
@@ -464,7 +669,7 @@ All notable changes to this project will be documented in this file. This change
 
 ## [1.9] - 2016-01-20
 ### Added
-- New website with comprehensive User Guide: [http://planck-repl.org](http://planck-repl.org).
+- New website with comprehensive User Guide: [https://planck-repl.org](http://planck-repl.org).
 - Socket REPL.
 - Lazily load core analysis caches (2x faster in some cases).
 - `apropos` and `dir` support.
@@ -618,7 +823,20 @@ All notable changes to this project will be documented in this file. This change
 ### Added
 - Initial release.
 
-[Unreleased]: https://github.com/mfikes/planck/compare/2.11.0...HEAD
+[Unreleased]: https://github.com/mfikes/planck/compare/2.22.0...HEAD
+[2.22.0]: https://github.com/mfikes/planck/compare/2.21.0...2.22.0
+[2.21.0]: https://github.com/mfikes/planck/compare/2.20.0...2.21.0
+[2.20.0]: https://github.com/mfikes/planck/compare/2.19.1...2.20.0
+[2.19.0]: https://github.com/mfikes/planck/compare/2.18.1...2.19.0
+[2.18.1]: https://github.com/mfikes/planck/compare/2.18.0...2.18.1
+[2.18.0]: https://github.com/mfikes/planck/compare/2.17.0...2.18.0
+[2.17.0]: https://github.com/mfikes/planck/compare/2.16.0...2.17.0
+[2.16.0]: https://github.com/mfikes/planck/compare/2.15.0...2.16.0
+[2.15.0]: https://github.com/mfikes/planck/compare/2.14.0...2.15.0
+[2.14.0]: https://github.com/mfikes/planck/compare/2.13.0...2.14.0
+[2.13.0]: https://github.com/mfikes/planck/compare/2.12.6...2.13.0
+[2.12.6]: https://github.com/mfikes/planck/compare/2.12.0...2.12.6
+[2.12.0]: https://github.com/mfikes/planck/compare/2.11.0...2.12.0
 [2.11.0]: https://github.com/mfikes/planck/compare/2.10.0...2.11.0
 [2.10.0]: https://github.com/mfikes/planck/compare/2.9.0...2.10.0
 [2.9.0]: https://github.com/mfikes/planck/compare/2.8.1...2.9.0

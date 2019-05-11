@@ -9,6 +9,10 @@
 #include <signal.h>
 #include <sys/stat.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 #include "bundle.h"
 #include "engine.h"
 #include "globals.h"
@@ -32,67 +36,73 @@ void ignore_sigpipe() {
 }
 
 void usage(char *program_name) {
-    printf("\n");
-    printf("Usage:  %s [init-opt*] [main-opt] [arg*]\n", program_name);
-    printf("\n");
-    printf("  With no options or args, runs an interactive Read-Eval-Print Loop\n");
-    printf("\n");
-    printf("  init options:\n");
-    printf("    -i path, --init=path        Load a file or resource\n");
-    printf("    -e string, --eval=string    Evaluate expressions in string; print non-nil\n");
-    printf("                                values\n");
-    printf("    -c cp, --classpath=cp       Use colon-delimited cp for source directories\n");
-    printf("                                and JARs. PLANCK_CLASSPATH env var may be used\n");
-    printf("                                instead.\n");
-    printf("    -D dep, --dependencies dep  Use comma-separated list of dependencies to\n");
-    printf("                                look for in the local Maven repository.\n");
-    printf("                                Dependencies should be specified in the form\n");
-    printf("                                SYM:VERSION (e.g.: foo/bar:1.2.3).\n");
-    printf("    -L path, --local-repo path  Path to the local Maven repository where Planck\n");
-    printf("                                will look for dependencies. Defaults to\n");
-    printf("                                ~/.m2/repository.\n");
-    printf("    -K, --auto-cache            Create and use .planck_cache dir for cache\n");
-    printf("    -k path, --cache=path       If dir exists at path, use it for cache\n");
-    printf("    -q, --quiet                 Quiet mode\n");
-    printf("    -v, --verbose               Emit verbose diagnostic output\n");
-    printf("    -d, --dumb-terminal         Disable line editing / VT100 terminal control\n");
-    printf("    -t theme, --theme=theme     Set the color theme\n");
-    printf("    -n x, --socket-repl=x       Enable socket REPL where x is port or IP:port\n");
-    printf("    -s, --static-fns            Generate static dispatch function calls\n");
-    printf("    -f, --fn-invoke-direct      Do not not generate .call(null...) calls\n");
-    printf("                                for unknown functions, but instead direct\n");
-    printf("                                invokes via f(a0,a1...).\n");
-    printf("    -O x, --optimizations x     Closure compiler level applied to source loaded\n");
-    printf("                                from namespaces: none, whitespace, or simple.\n");
-    printf("    -A x, --checked-arrays x    Enables checked arrays where x is either warn\n");
-    printf("                                or error.\n");
-    printf("    -a, --elide-asserts         Set *assert* to false to remove asserts\n");
-    printf("\n");
-    printf("  main options:\n");
-    printf("    -m ns-name, --main=ns-name Call the -main function from a namespace with\n");
-    printf("                               args\n");
-    printf("    -r, --repl                 Run a repl\n");
-    printf("    path                       Run a script from a file or resource\n");
-    printf("    -                          Run a script from standard input\n");
-    printf("    -h, -?, --help             Print this help message and exit\n");
-    printf("    -l, --legal                Show legal info (licenses and copyrights)\n");
-    printf("    -V, --version              Show version and exit\n");
-    printf("\n");
-    printf("  operation:\n");
-    printf("\n");
-    printf("    - Enters the cljs.user namespace\n");
-    printf("    - Binds planck.core/*command-line-args* to a seq of strings containing\n");
-    printf("      command line args that appear after any main option\n");
-    printf("    - Runs all init options in order\n");
-    printf("    - Calls a -main function or runs a repl or script if requested\n");
-    printf("\n");
-    printf("  The init options may be repeated and mixed freely, but must appear before\n");
-    printf("  any main option.\n");
-    printf("\n");
-    printf("  Paths may be absolute or relative in the filesystem.\n");
-    printf("\n");
-    printf("  A comprehensive User Guide for Planck can be found at http://planck-repl.org\n");
-    printf("\n");
+  printf(
+    "\n"
+    "Usage:  %s [init-opt*] [main-opt] [arg*]\n"
+    "\n"
+    "  With no options or args, runs an interactive Read-Eval-Print Loop\n"
+    "\n"
+    "  init options:\n"
+    "    -co, --compile-opts edn     Options to configure compilation, can be an EDN\n"
+    "                                string or colon-separated list of EDN files /\n"
+    "                                classpath resources. Options will be merged left\n"
+    "                                to right.\n"
+    "    -i path, --init path        Load a file or resource\n"
+    "    -e string, --eval string    Evaluate expressions in string; print non-nil\n"
+    "                                values\n"
+    "    -c cp, --classpath cp       Use colon-delimited cp for source directories\n"
+    "                                and JARs. PLANCK_CLASSPATH env var may be used\n"
+    "                                instead.\n"
+    "    -D dep, --dependencies dep  Use comma-separated list of dependencies to\n"
+    "                                look for in the local Maven repository.\n"
+    "                                Dependencies should be specified in the form\n"
+    "                                SYM:VERSION (e.g.: foo/bar:1.2.3).\n"
+    "    -L path, --local-repo path  Path to the local Maven repository where Planck\n"
+    "                                will look for dependencies. Defaults to\n"
+    "                                ~/.m2/repository.\n"
+    "    -K, --auto-cache            Create and use .planck_cache dir for cache\n"
+    "    -k path, --cache path       If dir exists at path, use it for cache\n"
+    "    -q, --quiet                 Quiet mode\n"
+    "    -v, --verbose               Emit verbose diagnostic output\n"
+    "    -d, --dumb-terminal         Disable line editing / VT100 terminal control\n"
+    "    -t theme, --theme theme     Set the color theme\n"
+    "    -n x, --socket-repl x       Enable socket REPL where x is port or IP:port\n"
+    "    -s, --static-fns            Generate static dispatch function calls\n"
+    "    -f, --fn-invoke-direct      Do not not generate .call(null...) calls\n"
+    "                                for unknown functions, but instead direct\n"
+    "                                invokes via f(a0,a1...).\n"
+    "    -O x, --optimizations x     Closure compiler level applied to source loaded\n"
+    "                                from namespaces: none, whitespace, or simple.\n"
+    "    -A x, --checked-arrays x    Enables checked arrays where x is either warn\n"
+    "                                or error.\n"
+    "    -a, --elide-asserts         Set *assert* to false to remove asserts\n"
+    "\n"
+    "  main options:\n"
+    "    -m ns-name, --main ns-name Call the -main function from a namespace with\n"
+    "                               args\n"
+    "    -r, --repl                 Run a repl\n"
+    "    path                       Run a script from a file or resource\n"
+    "    -                          Run a script from standard input\n"
+    "    -h, -?, --help             Print this help message and exit\n"
+    "    -l, --legal                Show legal info (licenses and copyrights)\n"
+    "    -V, --version              Show version and exit\n"
+    "\n"
+    "  operation:\n"
+    "\n"
+    "    - Enters the cljs.user namespace\n"
+    "    - Binds *command-line-args* to a seq of strings containing command line\n"
+    "      args that appear after any main option\n"
+    "    - Runs all init options in order\n"
+    "    - Calls a -main function or runs a repl or script if requested\n"
+    "\n"
+    "  The init options may be repeated and mixed freely, but must appear before\n"
+    "  any main option.\n"
+    "\n"
+    "  Paths may be absolute or relative in the filesystem or relative to\n"
+    "  classpath. Classpath-relative paths have prefix of @ or @/\n"
+    "\n"
+    "  A comprehensive User Guide for Planck can be found at https://planck-repl.org\n"
+    "\n", program_name);
 }
 
 char *get_cljs_version() {
@@ -108,24 +118,13 @@ char *get_cljs_version() {
     }
 }
 
-void banner() {
-    printf("Planck %s\n", PLANCK_VERSION);
-    char* cljs_version = get_cljs_version();
-    printf("ClojureScript %s\n", cljs_version);
-    free(cljs_version);
-
-    printf("    Docs: (doc function-name-here)\n");
-    printf("          (find-doc \"part-of-name-here\")\n");
-    printf("  Source: (source function-name-here)\n");
-    printf("    Exit: Control+D or :cljs/quit or exit or quit\n");
-    printf(" Results: Stored in vars *1, *2, *3, an exception in *e\n");
-
-    printf("\n");
-}
-
 struct config config;
 int exit_value = 0;
 bool return_termsize = false;
+
+void banner() {
+    printf("ClojureScript %s\n", config.clojurescript_version);
+}
 
 char *ensure_trailing_slash(char *s) {
     if (str_has_suffix(s, "/") == 0) {
@@ -273,6 +272,15 @@ void dump_sdk(char* target_path) {
     }
 }
 
+void process_compile_opts(char* compile_opts) {
+    if (!config.compile_opts) {
+        config.compile_opts = malloc(sizeof(char*));
+    } else {
+        config.compile_opts = realloc(config.compile_opts, (sizeof(char*) * (config.num_compile_opts + 1)));
+    }
+    config.compile_opts[config.num_compile_opts++] = strdup(compile_opts);
+}
+
 bool should_ignore_arg(const char *opt) {
     if (opt[0] != '-') {
         return false;
@@ -284,7 +292,7 @@ bool should_ignore_arg(const char *opt) {
     }
 
     // opt is a short opt or clump of short opts. If the clump
-    // ends with i, e, m, c, n, k, t, S, A, O, D, or L
+    // ends with i, e, m, c, n, k, t, S, A, O, D, L, or \1
     // then this opt takes an argument.
     int idx = 0;
     char c = 0;
@@ -305,12 +313,49 @@ bool should_ignore_arg(const char *opt) {
             last_c == 'A' ||
             last_c == 'O' ||
             last_c == 'D' ||
-            last_c == 'L');
+            last_c == 'L' ||
+            last_c == '\1');
+}
+
+void control_FTL_JIT() {
+
+    // Older versions of JavaScriptCore were crashing in FTL JIT.
+    // Default to FTL JIT to off if older version on macOS or Unix.
+
+#ifdef __APPLE__
+    int32_t jsc_version = NSVersionOfLinkTimeLibrary("JavaScriptCore");
+    bool default_disable_ftl_jit = (jsc_version < 0x25f0128);
+#else
+    bool default_disable_ftl_jit = true;
+#endif
+
+    if (default_disable_ftl_jit &&
+        getenv("JSC_useFTLJIT") == NULL) {
+        putenv("JSC_useFTLJIT=false");
+    }
+
+}
+
+char** expand_medium_opts(int argc, char **argv) {
+    char** rv = malloc(argc * sizeof(char*));
+    int i;
+    for (i = 0; i < argc; i++) {
+        if (!strcmp(argv[i], "-co")) {
+            rv[i] = "--compile-opts";
+        } else {
+            rv[i] = argv[i];
+        }
+    }
+    return rv;
 }
 
 int main(int argc, char **argv) {
 
+    control_FTL_JIT();
+
     ignore_sigpipe();
+
+    argv = expand_medium_opts(argc, argv);
 
     // A bare hyphen or a script path not preceded by -[iems] are the two types of mainopt not detected
     // by getopt_long(). If one of those two things is found, everything afterward is a *command-line-args* arg.
@@ -360,6 +405,11 @@ int main(int argc, char **argv) {
     config.socket_repl_port = 0;
     config.socket_repl_host = NULL;
 
+    config.clojurescript_version = get_cljs_version();
+
+    config.num_compile_opts = 0;
+    config.compile_opts = NULL;
+
     char *classpath = NULL;
     char *dependencies = NULL;
     char *local_repo = NULL;
@@ -386,9 +436,9 @@ int main(int argc, char **argv) {
             {"dependencies",     required_argument, NULL, 'D'},
             {"local-repo",       required_argument, NULL, 'L'},
             {"auto-cache",       no_argument,       NULL, 'K'},
-            {"compile",          no_argument,       NULL, 'Z'},
             {"init",             required_argument, NULL, 'i'},
             {"main",             required_argument, NULL, 'm'},
+            {"compile-opts",     required_argument, NULL, '\1'},
 
             // development options
             {"javascript",       no_argument,       NULL, 'j'},
@@ -402,8 +452,11 @@ int main(int argc, char **argv) {
     // pass index_of_script_path_or_hyphen instead of argc to guarantee that everything
     // after a bare dash "-" or a script path gets passed as *command-line-args*
     while (!did_encounter_main_opt &&
-           (opt = getopt_long(index_of_script_path_or_hyphen, argv, "O:Xh?VS:D:L:lvrA:sfak:je:t:n:dc:o:Ki:qm:", long_options, &option_index)) != -1) {
+           (opt = getopt_long(index_of_script_path_or_hyphen, argv, "O:Xh?VS:D:L:\1:lvrA:sfak:je:t:n:dc:o:Ki:qm:", long_options, &option_index)) != -1) {
         switch (opt) {
+            case '\1':
+                process_compile_opts(optarg);
+                break;
             case 'X':
                 init_launch_timing();
                 break;
@@ -601,7 +654,8 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (config.num_scripts == 0 && config.main_ns_name == NULL && config.num_rest_args == 0) {
+    if (config.num_scripts == 0 && config.main_ns_name == NULL && config.num_rest_args == 0
+        && config.num_compile_opts == 0) {
         config.repl = true;
     }
 
@@ -662,7 +716,7 @@ int main(int argc, char **argv) {
 
         evaluate_source(script.type, script.source, script.expression, false, NULL, config.theme, true, 0);
     } else if (config.repl) {
-        if (!config.quiet) {
+        if (!config.quiet && !config.num_scripts) {
             banner();
         }
 
@@ -675,10 +729,6 @@ int main(int argc, char **argv) {
 
     if (exit_value == EXIT_SUCCESS) {
         block_until_tasks_complete();
-    }
-
-    if (exit_value == EXIT_SUCCESS_INTERNAL) {
-        exit_value = EXIT_SUCCESS;
     }
 
     engine_shutdown();

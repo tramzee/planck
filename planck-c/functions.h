@@ -15,6 +15,9 @@ function_load(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, si
 JSValueRef function_load_deps_cljs_files(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
                                          const JSValueRef args[], JSValueRef *exception);
 
+JSValueRef function_load_data_readers_files(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
+                                            const JSValueRef args[], JSValueRef *exception);
+
 JSValueRef function_load_from_jar(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
                                   size_t argc, const JSValueRef args[], JSValueRef *exception);
 
@@ -36,8 +39,8 @@ function_print_fn(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject
 JSValueRef function_print_err_fn(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
                                  const JSValueRef args[], JSValueRef *exception);
 
-JSValueRef function_set_exit_value(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
-                                   const JSValueRef args[], JSValueRef *exception);
+JSValueRef function_exit_with_value(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
+                                    const JSValueRef args[], JSValueRef *exception);
 
 JSValueRef function_raw_read_stdin(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
                                    const JSValueRef args[], JSValueRef *exception);
@@ -102,8 +105,14 @@ JSValueRef
 function_file_output_stream_close(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
                                   const JSValueRef args[], JSValueRef *exception);
 
+JSValueRef function_mkdirs(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                           size_t argc, const JSValueRef args[], JSValueRef *exception);
+
 JSValueRef function_delete_file(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
                                 const JSValueRef args[], JSValueRef *exception);
+
+JSValueRef function_copy_file(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                              size_t argc, const JSValueRef args[], JSValueRef *exception);
 
 JSValueRef function_list_files(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argc,
                                const JSValueRef args[], JSValueRef *exception);
@@ -141,3 +150,12 @@ JSValueRef function_socket_close(JSContextRef ctx, JSObjectRef function, JSObjec
 
 JSValueRef function_sleep(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
                           size_t argc, const JSValueRef args[], JSValueRef *exception);
+
+JSValueRef function_signal_task_complete(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                         size_t argc, const JSValueRef args[], JSValueRef *exception);
+
+JSValueRef function_getenv(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                           size_t argc, const JSValueRef args[], JSValueRef *exception);
+
+JSValueRef function_isatty(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                           size_t argc, const JSValueRef args[], JSValueRef *exception);

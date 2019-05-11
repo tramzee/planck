@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    --keep-gcl)
+      export KEEP_GCL=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ "${VERBOSE_BUILD:-0}" == "1" ]; then
+  set -x
+fi
+
 if [ -z "$BUILD_PPA" ]; then
     rm -rf compiler
 fi
@@ -8,8 +25,22 @@ cd planck-cljs
 script/clean
 cd ..
 
+# GCL
+if [ -z "$BUILD_PPA" ]; then
+    if ! [ "${KEEP_GCL:-0}" == "1" ]; then
+        rm -rf planck-cljs/lib/closure
+        rm -rf planck-cljs/lib/third_party
+    fi
+    rm -f planck-cljs/src/planck/bundle/gcl.cljs
+    rm -rf planck-cljs/src/planck/bundle
+fi
+
 # CMake
 rm -rf planck-c/build
+
+if [ -z "$BUILD_PPA" ]; then
+  rm -f planck-man/plk.1
+fi
 
 # Site
 cd site

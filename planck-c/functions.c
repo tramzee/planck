@@ -27,9 +27,12 @@
 #include "repl.h"
 #include "clock.h"
 #include "sockets.h"
+#include "tasks.h"
 
 #define CONSOLE_LOG_BUF_SIZE 1000
 char console_log_buf[CONSOLE_LOG_BUF_SIZE];
+
+extern char **environ;
 
 JSValueRef function_console_stdout(JSContextRef ctx, JSObjectRef function, JSObjectRef this_object,
                                    size_t argc, JSValueRef const *args, JSValueRef *exception) {
@@ -217,12 +220,11 @@ JSValueRef function_load(JSContextRef ctx, JSObjectRef function, JSObjectRef thi
     return JSValueMakeNull(ctx);
 }
 
-JSValueRef function_load_deps_cljs_files(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+JSValueRef function_load_all_files(const char* filename, JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
                                          size_t argc, const JSValueRef args[], JSValueRef *exception) {
     size_t num_files = 0;
-    char **deps_cljs_files = NULL;
-
-    const char* deps_cljs_filename = "deps.cljs";
+    char **paths = NULL;
+    char **sources = NULL;
 
     if (argc == 0) {
         int i;
@@ -246,12 +248,16 @@ JSValueRef function_load_deps_cljs_files(JSContextRef ctx, JSObjectRef function,
                         }
                     }
                     if (config.src_paths[i].archive) {
-                        char *source = get_contents_zip(config.src_paths[i].archive, deps_cljs_filename,
+                        char *source = get_contents_zip(config.src_paths[i].archive, filename,
                                                         NULL, &error_msg);
                         if (source != NULL) {
                             num_files += 1;
-                            deps_cljs_files = realloc(deps_cljs_files, num_files * sizeof(char *));
-                            deps_cljs_files[num_files - 1] = source;
+                            paths = realloc(paths, num_files * sizeof(char *));
+                            sources = realloc(sources, num_files * sizeof(char *));
+                            char buffer[1024];
+                            snprintf(buffer, 1024, "jar:file://%s!/%s", location, filename);
+                            paths[num_files - 1] = strdup(buffer);
+                            sources[num_files - 1] = source;
                         } else {
                             if (error_msg) {
                                 engine_print(error_msg);
@@ -265,12 +271,16 @@ JSValueRef function_load_deps_cljs_files(JSContextRef ctx, JSObjectRef function,
                     config.src_paths[i].blacklisted = true;
                 }
             } else {
-                char *full_path = str_concat(location, deps_cljs_filename);
+                char *full_path = str_concat(location, filename);
                 char *source = get_contents(full_path, NULL);
                 if (source != NULL) {
                     num_files += 1;
-                    deps_cljs_files = realloc(deps_cljs_files, num_files * sizeof(char *));
-                    deps_cljs_files[num_files - 1] = source;
+                    paths = realloc(paths, num_files * sizeof(char *));
+                    sources = realloc(sources, num_files * sizeof(char *));
+                    char buffer[1024];
+                    snprintf(buffer, 1024, "file://%s%s", location, filename);
+                    paths[num_files - 1] = strdup(buffer);
+                    sources[num_files - 1] = source;
                 }
                 free(full_path);
             }
@@ -280,13 +290,29 @@ JSValueRef function_load_deps_cljs_files(JSContextRef ctx, JSObjectRef function,
     JSValueRef files[num_files];
     int i;
     for (i = 0; i < num_files; i++) {
-        JSStringRef file = JSStringCreateWithUTF8CString(deps_cljs_files[i]);
-        files[i] = JSValueMakeString(ctx, file);
-        free(deps_cljs_files[i]);
+        JSValueRef res[2];
+        JSStringRef path = JSStringCreateWithUTF8CString(paths[i]);
+        res[0] = JSValueMakeString(ctx, path);
+        JSStringRef source = JSStringCreateWithUTF8CString(sources[i]);
+        res[1] = JSValueMakeString(ctx, source);
+        files[i] = JSObjectMakeArray(ctx, 2, res, NULL);
+        free(paths[i]);
+        free(sources[i]);
     }
-    free(deps_cljs_files);
+    free(paths);
+    free(sources);
 
     return JSObjectMakeArray(ctx, num_files, files, NULL);
+}
+
+JSValueRef function_load_deps_cljs_files(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                         size_t argc, const JSValueRef args[], JSValueRef *exception) {
+    return function_load_all_files("deps.cljs", ctx, function, thisObject, argc, args, exception);
+}
+
+JSValueRef function_load_data_readers_files(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                         size_t argc, const JSValueRef args[], JSValueRef *exception) {
+    return function_load_all_files("data_readers.cljc", ctx, function, thisObject, argc, args, exception);
 }
 
 JSValueRef function_load_from_jar(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
@@ -476,13 +502,11 @@ JSValueRef function_print_err_fn(JSContextRef ctx, JSObjectRef function, JSObjec
     return JSValueMakeNull(ctx);
 }
 
-JSValueRef function_set_exit_value(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
-                                   size_t argc, const JSValueRef args[], JSValueRef *exception) {
+JSValueRef function_exit_with_value(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                    size_t argc, const JSValueRef args[], JSValueRef *exception) {
     if (argc == 1 && JSValueGetType(ctx, args[0]) == kJSTypeNumber) {
         exit_value = (int) JSValueToNumber(ctx, args[0], NULL);
-        if (exit_value == 0) {
-            exit_value = EXIT_SUCCESS_INTERNAL;
-        }
+        exit(exit_value);
     }
     return JSValueMakeNull(ctx);
 }
@@ -769,6 +793,17 @@ JSValueRef function_file_input_stream_open(JSContextRef ctx, JSObjectRef functio
 
 JSValueRef function_file_input_stream_read(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
                                            size_t argc, const JSValueRef args[], JSValueRef *exception) {
+
+    static JSValueRef *charmap = NULL;
+    if (!charmap) {
+        charmap = malloc(256 * sizeof (JSValueRef));
+        int i;
+        for (i = 0; i < 256; i++) {
+            charmap[i] = JSValueMakeNumber(ctx, i);
+            JSValueProtect(ctx, charmap[i]);
+        }
+    }
+
     if (argc == 1
         && JSValueGetType(ctx, args[0]) == kJSTypeString) {
 
@@ -781,14 +816,17 @@ JSValueRef function_file_input_stream_read(JSContextRef ctx, JSObjectRef functio
 
         free(descriptor);
 
-        JSValueRef arguments[read];
-        int num_arguments = (int) read;
-        int i;
-        for (i = 0; i < num_arguments; i++) {
-            arguments[i] = JSValueMakeNumber(ctx, buf[i]);
-        }
+        if (read) {
+            // TODO distinguish between eof and error down in fread call and throw if errro
+            JSValueRef arguments[read];
+            int num_arguments = (int) read;
+            int i;
+            for (i = 0; i < num_arguments; i++) {
+                arguments[i] = charmap[buf[i]];
+            }
 
-        return JSObjectMakeArray(ctx, num_arguments, arguments, NULL);
+            return JSObjectMakeArray(ctx, num_arguments, arguments, NULL);
+        }
     }
 
     return JSValueMakeNull(ctx);
@@ -886,6 +924,21 @@ JSValueRef function_file_output_stream_close(JSContextRef ctx, JSObjectRef funct
     return JSValueMakeNull(ctx);
 }
 
+JSValueRef function_mkdirs(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                           size_t argc, const JSValueRef args[], JSValueRef *exception) {
+    if (argc == 1
+        && JSValueGetType(ctx, args[0]) == kJSTypeString) {
+        char *path = value_to_c_string(ctx, args[0]);
+        int rv = mkdir_parents(path);
+        free(path);
+        
+        if (rv == -1) {
+            return JSValueMakeBoolean(ctx, false);
+        }
+    }
+    return JSValueMakeBoolean(ctx, true);
+}
+
 JSValueRef function_delete_file(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
                                 size_t argc, const JSValueRef args[], JSValueRef *exception) {
     if (argc == 1
@@ -894,6 +947,28 @@ JSValueRef function_delete_file(JSContextRef ctx, JSObjectRef function, JSObject
         char *path = value_to_c_string(ctx, args[0]);
         remove(path);
         free(path);
+    }
+    return JSValueMakeNull(ctx);
+}
+
+JSValueRef function_copy_file(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                              size_t argc, const JSValueRef args[], JSValueRef *exception) {
+    if (argc == 2
+        && JSValueGetType(ctx, args[0]) == kJSTypeString
+        && JSValueGetType(ctx, args[1]) == kJSTypeString) {
+
+        char *src = value_to_c_string(ctx, args[0]);
+        char *dst = value_to_c_string(ctx, args[1]);
+
+        int rv = copy_file(src, dst);
+        if (rv) {
+            JSValueRef arguments[1];
+            arguments[0] = c_string_to_value(ctx, strerror(errno));
+            *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+        }
+
+        free(src);
+        free(dst);
     }
     return JSValueMakeNull(ctx);
 }
@@ -1151,6 +1226,11 @@ JSValueRef function_set_timeout(JSContextRef ctx, JSObjectRef function, JSObject
         unsigned long *timeout_data = malloc(sizeof(unsigned long));
         *timeout_data = timeout_id;
 
+        int err = signal_task_started();
+        if (err) {
+            engine_print_err_message("signal_task_started", err);
+        }
+
         start_timer(millis, do_run_timeout, (void *) timeout_data);
 
         return rv;
@@ -1194,6 +1274,11 @@ JSValueRef function_set_interval(JSContextRef ctx, JSObjectRef function, JSObjec
                 ++interval_id;
             }
             curr_interval_id = interval_id;
+
+            int err = signal_task_started();
+            if (err) {
+                engine_print_err_message("signal_task_started", err);
+            }
         } else {
             curr_interval_id = (unsigned long) JSValueToNumber(ctx, args[1], NULL);
         }
@@ -1387,11 +1472,68 @@ JSValueRef function_sleep(JSContextRef ctx, JSObjectRef function, JSObjectRef th
         t.tv_nsec = 1000 * 1000 * (millis % 1000) + nanos;
         
         if (t.tv_sec != 0 || t.tv_nsec != 0) {
-            int err = nanosleep(&t, NULL);
+            int err;
+            while ((err = nanosleep(&t, &t)) && errno == EINTR) {}
             if (err) {
                 engine_perror("sleep");
             }
         }
     }
     return JSValueMakeNull(ctx);
+}
+
+JSValueRef function_signal_task_complete(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                         size_t argc, const JSValueRef args[], JSValueRef *exception) {
+    int err = signal_task_complete();
+    if (err) {
+        engine_print_err_message("signal_task_complete", err);
+    }
+    return JSValueMakeNull(ctx);
+}
+
+JSValueRef function_getenv(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                           size_t argc, const JSValueRef args[], JSValueRef *exception) {
+  if (argc == 0) {
+      int i = 0;
+      JSObjectRef env = JSObjectMake(ctx, NULL, NULL);
+      while(environ[i]) {
+          char* entry = strdup(environ[i++]);
+          char* name = strsep(&entry, "=");
+          JSObjectSetProperty(ctx, env, JSStringCreateWithUTF8CString(name), c_string_to_value(ctx, entry),
+                              kJSPropertyAttributeReadOnly, NULL);
+      }
+
+      return env;
+  } else if (argc == 1) {
+      JSValueRef arg = args[0];
+      char* name = value_to_c_string(ctx, arg);
+      char* entry = getenv(name);
+      JSValueRef value;
+      if(entry == NULL || strlen(entry) == 0) {
+          value = JSValueMakeNull(ctx);
+      } else {
+          value = c_string_to_value(ctx, entry);
+      }
+      return value;
+  } else {
+      JSValueRef arguments[1];
+      arguments[0] = c_string_to_value(ctx, strerror(7)); // Argument list too long
+      *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+  }
+  return JSValueMakeNull(ctx);
+}
+
+JSValueRef function_isatty(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                           size_t argc, const JSValueRef args[], JSValueRef *exception) {
+  if (argc == 1 && JSValueGetType(ctx, args[0]) == kJSTypeNumber) {
+    int fd = (int) JSValueToNumber(ctx, args[0], NULL);
+    if (fd >= 0) {
+      errno = 0;
+      bool result = isatty(fd);
+      if (errno != EBADF) {
+        return JSValueMakeBoolean(ctx, result);
+      }
+    }
+  }
+  return JSValueMakeNull(ctx);
 }

@@ -3,7 +3,7 @@
 <img width="100" align="right" style="margin: 0ex 1em" src="img/scripts.jpg">
 Planck can be used to run scripts written in ClojureScript. Planck and JavaScriptCore are fast to start up, and the ClojureScript reader and compiler have been optimized for bootstrapped mode, making this a perfectly feasible approach. It makes for a great alternative for shell scripts written in, say, Bash.
 
-Perhaps the simplest way to execute a script with Planck is to create a file and to use `planck` to run it. For example, say you have `foo.cljs` with
+Perhaps the simplest way to execute a script with Planck is to create a file and to use `plk` or `planck` to run it. For example, say you have `foo.cljs` with
 
 ```
 (println "Hello World!")
@@ -12,7 +12,7 @@ Perhaps the simplest way to execute a script with Planck is to create a file and
 Then you can execute it:
 
 ```
-$ planck foo.cljs
+$ plk foo.cljs
 Hello World!
 ```
 
@@ -21,7 +21,7 @@ Hello World!
 What if you'd like to make a standalone executable? The Clojure reader treats `#!` as a line comment, supporting the use of shebang scripts. You can change `foo.cljs` to look like
 
 ```
-#!/usr/bin/env planck
+#!/usr/bin/env plk
 (println "Hello World!")
 ```
 
@@ -34,9 +34,11 @@ Hello World!
 ```
 
 ```
-$ planck bar.cljs there
+$ plk bar.cljs there
 Hello there!
 ```
+
+> If you'd like to directly specify dependencies in scripts using `#!` see the “Shebang Deps” section of [Dependencies](https://planck-repl.org/dependencies.html).
 
 ### Main Function
 
@@ -57,7 +59,7 @@ If you'd like your script to start execution by executing a main function, you c
 then this works:
 
 ```
-$ planck -m foo.core ClojureScript
+$ plk -m foo.core ClojureScript
 Hello ClojureScript!
 ```
 
@@ -68,7 +70,7 @@ Alternatively, you can make use of `cljs.core/*main-cli-fn*`. If this Var is set
 This can be especially useful for standalone scripts on Linux, where it is not possible to specify interpreter arguments in the shebang line. Consider this alternative to the above, where this file is saved as `foo`:
 
 ```
-#!/usr/bin/env planck
+#!/usr/bin/env plk
 (ns foo.core)
 
 (defn greet [name]
@@ -102,7 +104,7 @@ So in order to demonstrate this, here is a script that simply copies each line
 it receives on standard input to standard out:
 
 ```
-#!/usr/bin/env planck
+#!/usr/bin/env plk
 
 (ns example.echo
   (:require [planck.core :as core]))
@@ -128,14 +130,14 @@ With `bar.cljs`:
 You can use the [`clojure.tools.cli`](https://github.com/clojure/tools.cli) library to parse command line options. Here is the intro example being used with Planck:
 
 ```
-$ planck -c tools.cli-0.3.5.jar -m my.program -vvvp8080 foo --help --invalid-opt
-{:errors ["Unknown option: \"--invalid-opt\""],
+$ plk -Sdeps '{:deps {org.clojure/tools.cli {:mvn/version "0.3.5"}}}' -m my.program -vvvp8080 foo --help --invalid-opt
+{:options {:port 8080, :verbosity 3, :help true},
  :arguments ["foo"],
  :summary "  -p, --port PORT  80  Port number\n  -v                   Verbosity level\n  -h, --help",
- :options {:port 8080, :verbosity 3, :help true}}
+ :errors ["Unknown option: \"--invalid-opt\""]}
 ```
 
-where `my/program.cljs` contains:
+where `src/my/program.cljs` contains:
 
 ```clojure
 (ns my.program
@@ -160,13 +162,24 @@ where `my/program.cljs` contains:
   (pprint (parse-opts args cli-options)))
 ```
 
+### Environment Variables
+
+Environment variables are accessible via `planck.environ/env`. For example, the following script will print the `HOME` environment variable:
+
+```
+(ns baz.core 
+  (:require [planck.environ :refer [env]]))
+  
+(println (:home env)) 
+```
+
 ### Shell Interaction
 
 The `planck.shell` namespace provides functions for interacting with the shell.
 Commands can be executed by running the `sh` function as seen in the following example:
 
 ```
-#!/usr/bin/env planck
+#!/usr/bin/env plk
 (ns foo.core
   (:require [planck.shell :refer [sh]]))
 
@@ -176,3 +189,29 @@ Commands can be executed by running the `sh` function as seen in the following e
 
 (list-files (first *command-line-args*))
 ```
+
+### Script Termination Delay
+
+If you run a script that starts a timer, or launches an asynchronous shell interaction, the script will continue running so long as there are pending timers or shell activities.
+
+For example, this script will run for 5 seconds, print "done" and then terminate:
+
+```
+(def x (js/setTimeout #(println "hi") 1e6))
+
+(js/setTimeout #(println "done") 5000)
+
+(js/clearTimeout x)
+```
+
+Similarly, this script will wait for 3 seconds, print `:done` and terminate:
+
+```
+(require '[planck.shell :refer [sh-async]])
+
+(sh-async "sleep" "3" #(prn :done))
+```
+
+
+
+

@@ -4,6 +4,18 @@ foo
 bar
 2
 foo
+Repeated ordered -e and -i, supressing nil, classpath resources @
+foo
+:a
+bar
+2
+foo
+Repeated ordered -e and -i, supressing nil, classpath resources @/
+foo
+:a
+bar
+2
+foo
 Test :cljs/quit
 1
 Test quit
@@ -13,6 +25,7 @@ Test exit
 Exit on first error
 true
 ok
+Execution error (Error) at (<cljs repl>:1).
 x
 Multi-line data
 [1 2]
@@ -51,15 +64,21 @@ nil
 119
 Test run file with exit
 111
+Test run file directly
+:run-file.core/hello
+Test run file classpath resource @
+:run-file.core/hello
+Test run file classpath without @
+Execution error (Error) at (<cljs repl>:1).
+Could not load file run_file/core.cljs
+Test run file classpath resource @/
+:run-file.core/hello
 Test run malformed expression
+Syntax error reading source at (<cljs repl>:1).
 Unmatched delimiter ].
 Test run malformed script
+Syntax error reading source at (<cljs repl>:1).
 Unmatched delimiter ].
-Test run expression with analysis error
-First argument to defn must be a symbol at line 1 
-Test run script with analysis error
-Could not eval int-test/src/analysis/core.cljs
-First argument to defn must be a symbol at line 1 
 Test in-ns
 nil
 nil
@@ -107,7 +126,15 @@ nil
 nil
 :reloaded
 Test require-macros unknown ns
+Execution error (ExceptionInfo) at (<cljs repl>:1).
 No such macros namespace: unknown-ns.core, could not locate unknown_ns/core.clj or unknown_ns/core.cljc
+Test spec cache
+nil
+true
+false
+nil
+true
+false
 Test require-macros REPL special
 nil
 5
@@ -241,16 +268,6 @@ nil
 nil
 Source not found
 nil
-(defmacro doc
-  "Prints documentation for a var or special form given its name"
-  [sym]
-  `(planck.repl/doc* '~sym))
-nil
-(defmacro doc
-  "Prints documentation for a var or special form given its name"
-  [sym]
-  `(planck.repl/doc* '~sym))
-nil
 nil
 (defn my-function
   "This is a cool
@@ -277,10 +294,12 @@ nil
 true
 #'cljs.user/f
 #'cljs.user/g
+Execution error (Error) at (<cljs repl>:1).
 whoah
 whoah
 nil
 #'cljs.user/e
+Execution error (Error) at (<cljs repl>:1).
 ouch
 ouch
 nil
@@ -292,14 +311,12 @@ true
 nil
 3
 4
-Test load-file from classpath
+Test load-file from classpath - expect this to fail
+Execution error (Error) at (<cljs repl>:1).
+Could not load file test_load_file/core.cljs
 nil
-true
 Test load REPL special
 nil
-nil
-true
-Test load-file from classpath env var
 nil
 true
 Test doc support for load-file REPL special
@@ -310,12 +327,12 @@ REPL Special Function
   Sequentially read and evaluate the set of forms contained in the file.
 nil
 Test load-file REPL bad filename
+Execution error (Error) at (<cljs repl>:1).
 Could not load file int-test/src/test_load_file/nofile.cljs
 nil
 Test load-file REPL error in file
 nil
 Test load-file REPL exit in file
-nil
 132
 Shell with-sh-dir
 nil
@@ -494,17 +511,16 @@ nil
 Test reader
 #js [1 2]
 #inst "2015-08-18T01:53:14.614-00:00"
-Set literal contains duplicate key: 1.
-Map literal contains duplicate key: 1.
+Syntax error reading source at (<cljs repl>:1).
+Set literal contains duplicate key: 1
+Syntax error reading source at (<cljs repl>:1).
+Map literal contains duplicate key: 1
 Test verbose
 5
 Test restore state when require fails
-Could not parse ns form cljs.user
+Execution error (ExceptionInfo) at (<cljs repl>:1).
 Invalid :refer, var clojure.set/diff does not exist
 nil
-Test reader and analysis diagnostics
-Only :as alias, :refer (names) and :rename {from to} options supported in :require; offending spec: [foo.bar :quu] at line 1 
-Unmatched delimiter ).
 Test eval
 nil
 1
@@ -553,6 +569,12 @@ Test chained timer and sh-async keeps script going
 2
 {:exit 0, :out "", :err ""}
 1
+Test clear timeout lets script stop
+:done
+Test clear interval lets script stop
+:tick
+:tick
+:done
 Disable asserts
 nil
 Testing console logging
@@ -583,7 +605,19 @@ nil
 3
 Forms should be evaluated in global scope
 true
+Execution error (ReferenceError) at (<cljs repl>:1).
 Can't find variable: source
-
+Execution error (ReferenceError) at (<cljs repl>:1).
 Can't find variable: a
-
+Auto-load user.cljs
+3
+stdio TTY is detected (in a faketty)
+[[*in* true] [*out* true] [*err* true]]
+stdin non-TTY is detected (in a pipeline)
+[*in* false]
+stdout non-TTY is detected (in a pipeline)
+[*out* false]
+stderr non-TTY is detected (redirected to /dev/null)
+[*err* false]
+*err* TTY is detected when rebound to *out* even when stderr is redirected to /dev/null
+[[*out* true] [*err* true]]

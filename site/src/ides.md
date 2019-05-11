@@ -6,10 +6,10 @@ Most Clojure developers using Emacs tend to use Cider. Cider needs the
 Clojure instance to be running `nRepl`, but Planck doesn't support
 that. Planck does instead implement the new Socket REPL capability, but Cider doesn't know how to interact with that.
 
-Luckily for us, [Rich Hickey](http://www.infoq.com/presentations/Simple-Made-Easy)
-[thinks Cider is too complex](http://batsov.com/articles/2014/12/04/introducing-inf-clojure-a-better-basic-clojure-repl-for-emacs/),
+Luckily for us, [Rich Hickey](https://www.infoq.com/presentations/Simple-Made-Easy)
+[thinks Cider is too complex](https://batsov.com/articles/2014/12/04/introducing-inf-clojure-a-better-basic-clojure-repl-for-emacs/),
 so 
-[Bozhidar Batsov](http://batsov.com) went ahead and created
+[Bozhidar Batsov](https://batsov.com) went ahead and created
 [inf-clojure](https://github.com/clojure-emacs/inf-clojure).
 
 #### Setup
@@ -19,7 +19,7 @@ instructions [here](https://github.com/clojure-emacs/inf-clojure) and
 add
 
 ```
-(setq inf-clojure-program "planck")
+(setq inf-clojure-generic-cmd "planck -d")
 ```
 
 to your `.emacs` file, given `planck` is on your path. I would be
@@ -40,7 +40,7 @@ pressing `C-x C-e` after the form you want to execute.
 It is possible to integrate Cursive with Planck using Planck's Socket REPL capability. To do this, set up a conventional ClojureScript project using, say Leiningen. Then add [Tubular](https://github.com/mfikes/tubular) as a dependency to the project via
 
 ```
-[tubular "1.0.0"]
+[tubular "1.2.0"]
 ```
 
 With this in place, first start up Planck in a regular terminal specifying the `src` directory of your project as Planck's `-c` classpath directive and use `-n` to have Planck listen on a port for Socket REPL sessions. For example:

@@ -1,9 +1,15 @@
+// Define _GNU_SOURCE so that execvpe is defined for non macOS builds
+#ifndef __APPLE__
+#define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <limits.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <JavaScriptCore/JavaScript.h>
@@ -142,43 +148,21 @@ void process_child_pipes(struct ThreadParams *params) {
     bool out_eof = false;
     bool err_eof = false;
 
-    if (params->in_str) {
-        char *to_write = params->in_str;
-        bool done = false;
-        while (!done) {
-            ssize_t result = write(params->inpipe, to_write, strlen(to_write));
-            if (result == -1) {
-                engine_perror("planck.shell write in");
-                done = true;
-            } else if (result != strlen(to_write)) {
-                to_write += result;
-            } else {
-                done = true;
-            }
-        }
-        close(params->inpipe);
-    }
-
+    char *to_write = params->in_str;
+    size_t remaining_to_write = to_write ? strlen(to_write) : 0;
+    
     while (!out_eof || !err_eof) {
 
-        struct pollfd fds[2];
-        nfds_t fd_count = 0;
+        struct pollfd fds[3];
+        nfds_t fd_count = 3;
 
-        if (!out_eof && !err_eof) {
-            fds[0].fd = params->outpipe;
-            fds[0].events = POLLIN | POLLHUP;
-            fds[1].fd = params->errpipe;
-            fds[1].events = POLLIN | POLLHUP;
-            fd_count = 2;
-        } else if (!out_eof) {
-            fds[0].fd = params->outpipe;
-            fds[0].events = POLLIN | POLLHUP;
-            fd_count = 1;
-        } else {
-            fds[0].fd = params->errpipe;
-            fds[0].events = POLLIN | POLLHUP;
-            fd_count = 1;
-        }
+
+        fds[0].fd = out_eof ? -1 : params->outpipe;
+        fds[0].events = POLLIN | POLLHUP;
+        fds[1].fd = err_eof ? -1 : params->errpipe;
+        fds[1].events = POLLIN | POLLHUP;
+        fds[2].fd = to_write ? params->inpipe : -1;
+        fds[2].events = POLLOUT;
 
         int rv = poll(fds, fd_count, 10000);
 
@@ -194,32 +178,31 @@ void process_child_pipes(struct ThreadParams *params) {
             continue;
         } else {
             if (fds[0].revents & (POLLIN | POLLHUP)) {
-                if (fds[0].fd == params->outpipe) {
-                    int res = read_child_pipe(params->outpipe, &out_buf, &out_total);
-                    if (res == 0) {
-                        out_eof = true;
-                    }
-                } else {
-                    int res = read_child_pipe(params->errpipe, &err_buf, &err_total);
-                    if (res == 0) {
-                        err_eof = true;
-                    }
+                int res = read_child_pipe(params->outpipe, &out_buf, &out_total);
+                if (res == 0) {
+                    out_eof = true;
                 }
             }
 
-            if (fd_count == 2) {
-                if (fds[1].revents & (POLLIN | POLLHUP)) {
-                    if (fds[1].fd == params->outpipe) {
-                        int res = read_child_pipe(params->outpipe, &out_buf, &out_total);
-                        if (res == 0) {
-                            out_eof = true;
-                        }
-                    } else {
-                        int res = read_child_pipe(params->errpipe, &err_buf, &err_total);
-                        if (res == 0) {
-                            err_eof = true;
-                        }
-                    }
+            if (fds[1].revents & (POLLIN | POLLHUP)) {
+                int res = read_child_pipe(params->errpipe, &err_buf, &err_total);
+                if (res == 0) {
+                    err_eof = true;
+                }
+            }
+
+            if (fds[2].revents & POLLOUT) {
+                size_t amount_to_write = remaining_to_write > 4096 ? (size_t)4096 : remaining_to_write;
+                ssize_t result = write(params->inpipe, to_write, amount_to_write);
+                if (result == -1) {
+                    engine_perror("planck.shell write in");
+                } else if (result != remaining_to_write) {
+                    to_write += result;
+                    remaining_to_write -= result;
+                } else {
+                    to_write = NULL;
+                    free(params->in_str);
+                    close(params->inpipe);
                 }
             }
         }
@@ -290,6 +273,76 @@ static void *thread_proc(void *params) {
     return (void *) wait_for_child((struct ThreadParams *) params);
 }
 
+static const char *get_path(void) {
+    const char *s = getenv("PATH");
+    return (s != NULL) ? s : ":/bin:/usr/bin";
+}
+
+static size_t count_occurrences(const char *s, char c) {
+    size_t count;
+    for (count = 0; *s != '\0'; s++)
+        count += (*s == c);
+    return count;
+}
+
+static const char *const *split_path(const char *path) {
+    const char *p, *q;
+    char **pathv;
+    int i;
+    size_t count = count_occurrences(path, ':') + 1;
+
+    pathv = malloc((count + 1)*(sizeof(char*)));
+    pathv[count] = NULL;
+    for (p = path, i = 0; i < count; i++, p = q + 1) {
+        for (q = p; (*q != ':') && (*q != '\0'); q++);
+        if (q == p)
+            pathv[i] = "./";
+        else {
+            int add_slash = ((*(q - 1)) != '/');
+            pathv[i] = malloc(q - p + add_slash + 1);
+            memcpy(pathv[i], p, q - p);
+            if (add_slash)
+                pathv[i][q - p] = '/';
+            pathv[i][q - p + add_slash] = '\0';
+        }
+    }
+    return (const char *const *) pathv;
+}
+
+static void planck_execvpe(const char *file, char * const *argv, char * const * envp) {
+    if (strchr(file, '/') != NULL) {
+        execve(file, argv, envp);
+    } else {
+        char expanded_file[PATH_MAX];
+        size_t filelen = strlen(file);
+        int sticky_errno = 0;
+        const char *const *dirs = split_path(get_path());
+        for (; *dirs; dirs++) {
+            const char *dir = *dirs;
+            size_t dirlen = strlen(dir);
+            if (filelen + dirlen + 1 >= PATH_MAX) {
+                errno = ENAMETOOLONG;
+                continue;
+            }
+            memcpy(expanded_file, dir, dirlen);
+            memcpy(expanded_file + dirlen, file, filelen);
+            expanded_file[dirlen + filelen] = '\0';
+            execve(expanded_file, argv, envp);
+            switch (errno) {
+                case EACCES:
+                    sticky_errno = errno;
+                case ENOENT:
+                case ENOTDIR:
+                    break;
+                default:
+                    return;
+            }
+        }
+        if (sticky_errno != 0)
+            errno = sticky_errno;
+    }
+}
+
 static JSValueRef system_call(JSContextRef ctx, char **cmd, char *in_str, char **env, char *dir, int cb_idx) {
     struct SystemResult result = {0, NULL, NULL};
     struct SystemResult *res = &result;
@@ -332,10 +385,14 @@ static JSValueRef system_call(JSContextRef ctx, char **cmd, char *in_str, char *
         close(err[0]);
         close(in[0]);
         if (env) {
-            extern char **environ;
-            environ = env;
+#ifdef __APPLE__
+            planck_execvpe(cmd[0], cmd, env);
+#else
+            execvpe(cmd[0], cmd, env);
+#endif
+        } else {
+            execvp(cmd[0], cmd);
         }
-        execvp(cmd[0], cmd);
         if (errno == EACCES || errno == EPERM) {
             exit(126);
         } else if (errno == ENOENT) {
@@ -400,24 +457,32 @@ static JSValueRef system_call(JSContextRef ctx, char **cmd, char *in_str, char *
 
 JSValueRef function_shellexec(JSContextRef ctx, JSObjectRef function, JSObjectRef this_object,
                               size_t argc, const JSValueRef args[], JSValueRef *exception) {
-    if (argc == 7) {
+    if (argc == 6) {
         char **command = cmd(ctx, (JSObjectRef) args[0]);
         if (command) {
             char *in_str = NULL;
             if (!JSValueIsNull(ctx, args[1])) {
-                in_str = value_to_c_string(ctx, args[1]);
+                unsigned int count = (unsigned int) array_get_count(ctx, (JSObjectRef) args[1]);
+                in_str = malloc(sizeof(char *) * (count + 1));
+                in_str[count] = 0;
+                unsigned int i;
+                for (i = 0; i < count; i++) {
+                    JSValueRef v = array_get_value_at_index(ctx, (JSObjectRef) args[1], i);
+                    double n = JSValueToNumber(ctx, v, NULL);
+                    in_str[i] = (unsigned char) n;
+                }
             }
             char **environment = NULL;
-            if (!JSValueIsNull(ctx, args[4])) {
-                environment = env(ctx, (JSObjectRef) args[4]);
+            if (!JSValueIsNull(ctx, args[3])) {
+                environment = env(ctx, (JSObjectRef) args[3]);
             }
             char *dir = NULL;
-            if (!JSValueIsNull(ctx, args[5])) {
-                dir = value_to_c_string(ctx, args[5]);
+            if (!JSValueIsNull(ctx, args[4])) {
+                dir = value_to_c_string(ctx, args[4]);
             }
             int callback_idx = -1;
-            if (!JSValueIsNull(ctx, args[6]) && JSValueIsNumber(ctx, args[6])) {
-                callback_idx = (int) JSValueToNumber(ctx, args[6], NULL);
+            if (!JSValueIsNull(ctx, args[5]) && JSValueIsNumber(ctx, args[5])) {
+                callback_idx = (int) JSValueToNumber(ctx, args[5], NULL);
             }
             return system_call(ctx, command, in_str, environment, dir, callback_idx);
         }

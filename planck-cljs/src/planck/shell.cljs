@@ -4,8 +4,9 @@
    [planck.shell])
   (:require
    [cljs.spec.alpha :as s]
-   [clojure.string]
+   [clojure.string :as string]
    [goog.object :as gobj]
+   [planck.core]
    [planck.io :as io :refer [as-file]]
    [planck.repl :as repl]))
 
@@ -28,7 +29,13 @@
     {:exit exit :out out :err err}))
 (gobj/set js/global "translate_async_result" translate-result)
 
-(def ^:private launch-fail "launch path not accessible")
+(defn- launch-fail-msg [executable-path]
+  (str "Launch path \"" executable-path "\" not accessible."
+    (when (string/includes? executable-path " ")
+      (let [tokens (string/split executable-path #" ")]
+        (str " Did you perhaps mean to launch using "
+          (pr-str (first tokens)) ", with " (pr-str (rest tokens))
+          " as arguments?")))))
 
 (def ^:private nil-func (fn [_] nil))
 (defn- sh-internal
@@ -43,14 +50,27 @@
             (into {} (map (comp (juxt :key :val) second) opts)))
           dir        (and dir (:path (as-file (second dir))))
           async?     (not= cb nil-func)
-          translated (translate-result (js/PLANCK_SHELL_SH (clj->js cmd) in in-enc out-enc
+          in-bytes   (when in
+                       (let [acc (volatile! [])
+                             os  (planck.core/->OutputStream
+                                   (fn [bytes]
+                                     (vswap! acc into bytes))
+                                   (fn [])
+                                   (fn []))]
+                         (io/copy in os in-enc)
+                         (into-array @acc)))
+          translated (translate-result (js/PLANCK_SHELL_SH (clj->js cmd) in-bytes out-enc
                                          (clj->js (seq env)) dir (if async? (assoc-cb cb))))
           {:keys [exit err]} translated]
-      (if (or (== 126 exit)
-              (== 127 exit)
-              (and (== -1 exit)
-                   (= launch-fail err)))
-        (throw (js/Error. launch-fail))
+      (cond
+        (or (== 126 exit)
+            (== 127 exit))
+        (throw (ex-info (if (empty? err)
+                          (launch-fail-msg (first args))
+                          (string/trimr err))
+                 translated))
+
+        :else
         (if async? nil translated)))))
 
 (defn sh
@@ -59,11 +79,9 @@
   cmd      the command(s) (Strings) to execute. will be concatenated together.
   options  optional keyword arguments-- see below.
   Options are:
-  :in      may be given followed by a string of one of the following formats:
-           String conforming to URL Syntax: 'file:///tmp/test.txt'
-           String pointing at an *existing* 'file: '/tmp/test.txt'
-           String with string input: 'Printing input from stdin with funny chars like $@ &'
-           to be fed to the sub-process's stdin.
+  :in      may be given followed by any legal input source for
+           planck.io/copy, e.g. IInputStream or IReader created using planck.io,
+           File, or string, to be fed to the sub-process's stdin.
   :in-enc  option may be given followed by a String, used as a character
            encoding name (for example \"UTF-8\" or \"ISO-8859-1\") to
            convert the input string specified by the :in option to the
@@ -89,11 +107,9 @@
   options  optional keyword arguments-- see below.
   cb       the callback to call upon completion
   Options are:
-  :in      may be given followed by a string of one of the following formats:
-           String conforming to URL Syntax: 'file:///tmp/test.txt'
-           String pointing at an *existing* 'file: '/tmp/test.txt'
-           String with string input: 'Printing input from stdin with funny chars like $@ &'
-           to be fed to the sub-process's stdin.
+  :in      may be given followed by any legal input source for
+           planck.io/copy, e.g. IInputStream or IReader created using planck.io,
+           File, or string, to be fed to the sub-process's stdin.
   :in-enc  option may be given followed by a String, used as a character
            encoding name (for example \"UTF-8\" or \"ISO-8859-1\") to
            convert the input string specified by the :in option to the
@@ -117,7 +133,7 @@
                                                (every? string? (vals m))))))
 
 (s/def ::sh-opt
-  (s/alt :in (s/cat :key #{:in} :val string?)
+  (s/alt :in (s/cat :key #{:in} :val any?)
     :in-enc (s/cat :key #{:in-enc} :val string?)
     :out-enc (s/cat :key #{:out-enc} :val string?)
     :dir (s/cat :key #{:dir} :val (s/or :string string? :file io/file?))

@@ -2,7 +2,8 @@
   (:require
    [clojure.string :as string]
    [clojure.test :refer [deftest is]]
-   [planck.io]
+   [planck.core]
+   [planck.io :as io]
    [planck.shell :include-macros true]))
 
 (deftest shell
@@ -11,7 +12,7 @@
 
 (deftest shell-throws
   (is (thrown-with-msg? js/Error
-        #"launch path not accessible"
+        #"Launch path \"bogus\" not accessible."
         (planck.shell/sh "bogus"))))
 
 (deftest capture-exit-value
@@ -51,10 +52,32 @@
 
 (deftest with-sh-env-throws-on-nil-env-vars-test
   (is (thrown-with-msg? js/Error
-                        #"fails spec"
+                        #"planck.shell/string-string-map\?"
                         (planck.shell/with-sh-env {nil "value-for-a-nil-key"}
                           (planck.shell/sh "env"))))
   (is (thrown-with-msg? js/Error
-                        #"fails spec"
+                        #"planck.shell/string-string-map\?"
                         (planck.shell/with-sh-env {"key-with-a-nil-value" nil}
                           (planck.shell/sh "env")))))
+
+(deftest launch-fail-ex-info-test
+  (try
+    (planck.shell/sh "env" "abc")
+    (catch :default e
+      (let [expected-errors #{"env: abc: No such file or directory"
+                              "env: ‘abc’: No such file or directory"}]
+        (is (= 127 (:exit (ex-data e))))
+        (is (= "" (:out (ex-data e))))
+        (is (contains? expected-errors (string/trim (:err (ex-data e)))))
+        (is (contains? expected-errors (ex-message e)))))))
+
+(deftest launch-fail-msg-test
+  (is (= "Launch path \"ls -l\" not accessible. Did you perhaps mean to launch using \"ls\", with (\"-l\") as arguments?"
+        (#'planck.shell/launch-fail-msg "ls -l"))))
+
+(deftest cat-in-test
+  (let [test-str (pr-str (range 1e5))
+        test-file (io/file "/tmp/plnk-cat-in-test.txt")]
+    (planck.core/spit test-file test-str)
+    (let [result (planck.shell/sh "cat" :in test-file)]
+      (is (= test-str (:out result))))))

@@ -20,18 +20,25 @@ _Vars_
 [eval](#eval)<br/>
 [exit](#exit)<br/>
 [file-seq](#file-seq)<br/>
+[find-var](#find-var)<br/>
 [init-empty-state](#init-empty-state)<br/>
 [intern](#intern)<br/>
 [line-seq](#line-seq)<br/>
+[load-reader](#load-reader)<br/>
+[load-string](#load-string)<br/>
+[ns-aliases](#ns-aliases)<br/>
+[ns-refers](#ns-refers)<br/>
 [ns-resolve](#ns-resolve)<br/>
 [read](#read)<br/>
 [read-line](#read-line)<br/>
 [read-password](#read-password)<br/>
 [read-string](#read-string)<br/>
+[requiring-resolve](#requiring-resolve)<br/>
 [resolve](#resolve)<br/>
 [sleep](#sleep)<br/>
 [slurp](#slurp)<br/>
 [spit](#spit)<br/>
+[with-in-str](#with-in-str)<br/>
 [with-open](#with-open)<br/>
 
 ## Protocols
@@ -139,6 +146,16 @@ A tree seq on files
 Spec<br/>
  _args_: `(cat :dir (or :string string? :file file?))`
 
+### <a name="find-var"></a>find-var
+`([sym])`
+
+Returns the global var named by the namespace-qualified symbol, or
+`nil` if no var with that name.
+
+Spec<br/>
+ _args_: `(cat :sym qualified-symbol?)`<br/>
+ _ret_: `(nilable var?)`
+
 ### <a name="init-empty-state"></a>init-empty-state
 `([state])`
 
@@ -174,6 +191,44 @@ Spec<br/>
  _args_: `(cat :rdr (instance? IBufferedReader %))`<br/>
  _ret_: `seq?`<br/>
 
+### <a name="load-reader"></a>load-reader
+`([rdr])`
+
+  Sequentially read and evaluate the set of forms contained in the
+  stream/file
+
+Spec<br/>
+ _args_: `(cat :reader (satisfies? IPushbackReader %))`<br/>
+ _ret_: `any?`
+
+### <a name="load-string"></a>load-string
+`([rdr])`
+
+  Sequentially read and evaluate the set of forms contained in the
+  string
+
+Spec<br/>
+ _args_: `(cat :s string?)`<br/>
+ _ret_: `any?`
+
+### <a name="ns-aliases"></a>ns-aliases
+`([ns])`
+
+Returns a map of the aliases for the namespace.
+
+Spec<br/>
+ _args_: `(cat :ns (or :sym symbol? :ns #(instance? Namespace %)))`<br/>
+ _ret_: `(map-of simple-symbol? (instance? Namespace %))`<br/>
+ 
+### <a name="ns-refers"></a>ns-refers
+`([ns])`
+
+Returns a map of the refer mappings for the namespace.
+
+Spec<br/>
+ _args_: `(cat :ns (or :sym symbol? :ns #(instance? Namespace %)))`<br/>
+ _ret_: `(map-of simple-symbol? var?)`<br/>
+ 
 ### <a name="ns-resolve"></a>ns-resolve
 `([ns sym])`
 
@@ -192,24 +247,14 @@ Spec<br/>
   Otherwise returns sentinel. If no reader is provided, [`*in*`](#in) will be used.
   Opts is a persistent map with valid keys:
   
-  `:read-cond` - `:allow` to process reader conditionals, or
-              `:preserve` to keep all branches
+  `:read-cond` - `:allow` to process reader conditionals, or `:preserve` to keep all branches
               
   `:features` - persistent set of feature keywords for reader conditionals
   
-  `:eof` - on eof, return value unless `:eofthrow`, then throw.
-        if not specified, will throw
+  `:eof` - on eof, return value unless `:eofthrow`, then throw. if not specified, will throw
 
 Spec<br/>
- _args_: `(alt
-         :nullary (cat )
-         :unary (cat :reader #(satisfies? IPushbackReader %))
-         :binary (cat :opts map? :reader #(satisfies? IPushbackReader %))
-         :ternary
-           (cat
-             :reader #(satisfies? IPushbackReader %)
-             :eof-error? boolean?
-             :eof-value any?))`<br/>
+ _args_:  `(alt :nullary (cat ) :unary (cat :reader #(satisfies? IPushbackReader %)) :binary (cat :opts map? :reader #(satisfies? IPushbackReader %)) :ternary (cat :reader #(satisfies? IPushbackReader %) :eof-error? boolean? :eof-value any?))`
 
 ### <a name="read-line"></a>read-line
 `([])`
@@ -239,6 +284,16 @@ Spec<br/>
 Spec<br/>
  _args_: `(alt :unary (cat :s string?) :binary (cat :opts map? :s string?))`<br/><br/>
 
+### <a name="requiring-resolve"></a>requiring-resolve
+`([sym])`
+
+  Resolves namespace-qualified sym per [`resolve`](#resolve). If initial resolve
+  fails, attempts to `require` `sym`'s namespace and retries.
+
+Spec<br/>
+ _args_: `(cat :sym qualified-symbol?)`<br/>
+ _ret_: `(nilable var?)`<br/>
+ 
 ### <a name="resolve"></a>resolve
 `([sym])`
 
@@ -279,6 +334,14 @@ Spec<br/>
 Spec<br/>
  `args`: `(cat :f (or :string string? :file file?) :content any? :opts (* any?))`
 
+### <a name="with-in-str"></a>with-in-str
+`([s & body])`
+
+_Macro_
+
+  Evaluates body in a context in which [`*in*`](#in) is bound to a fresh
+  string reader initialized with the string `s`.
+  
 ### <a name="with-open"></a>with-open
 `([bindings & body])`
 

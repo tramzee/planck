@@ -11,6 +11,7 @@ These namespaces comprise
 * `planck.io`
 * `planck.shell`
 * `planck.http`
+* `planck.environ`
 
 To explore these namespaces, you can evaluate `(dir planck.core)`, for example, to see the symbols in `planck.core`, and then use the `doc` macro to see the docs for any of the symbols.
 
@@ -28,7 +29,7 @@ The `planck.core/file-seq` function imitates `clojure.core/file-seq`.
 
 If you need to prompt for a password, take a look at `planck.core/read-password`.
 
-The `planck.core` defines `eval` and other dynamic functions like `resolve`, `ns-resolve`, and `intern`.
+The `planck.core` namespace defines dynamic functions like `resolve`, `ns-resolve`, and `intern`.
 
 Additionally, `planck.core/exit` is a function that takes an integer `exit-value` argument, so you can cause a Planck script to exit with any desired Unix exit value.
 
@@ -61,7 +62,19 @@ With this escape hatch, you can do nearly anything: Move files to remote hosts u
 This namespace provides facilities for interacting with HTTP servers. For example:
 
 ```
-(planck.http/get "http://planck-repl.org")
+(planck.http/get "https://planck-repl.org")
 ```
 
 will fetch the main page of the Planck website, returning the status code, headers, and body in a map structure.
+
+### planck.environ
+
+([Online docs](planck-environ.html))
+
+This namespace provided access to environment variables, modeled after [Environ](https://github.com/weavejester/environ). For example
+
+```
+(:home planck.environ/env)
+```
+
+will access the `HOME` environment variable.

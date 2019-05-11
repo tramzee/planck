@@ -1,6 +1,6 @@
 (ns planck.repl
   "Planck REPL implementation."
-  (:refer-clojure :exclude [resolve load-file])
+  (:refer-clojure :exclude [resolve load-file eval])
   (:require-macros
    [cljs.env.macros :refer [with-compiler-env]]
    [planck.repl :refer [with-err-str]])
@@ -9,6 +9,7 @@
    [cljs.compiler :as comp]
    [cljs.env :as env]
    [cljs.js :as cljs]
+   [cljs.repl]
    [cljs.source-map :as sm]
    [cljs.spec.alpha :as s]
    [cljs.stacktrace :as st]
@@ -27,6 +28,40 @@
    [planck.pprint.width-adjust]
    [planck.repl-resources :refer [repl-special-doc-map special-doc-map]]
    [planck.themes :refer [get-theme]]))
+
+;; Provide a mechanism so s/explain with core predicates can identify the predicate names
+
+(def ^:private fn-syms
+  (delay
+    (into {}
+      (planck.repl/make-fn-syms nil? int? array? number? not some? object? string? char? any? symbol? var?
+        iterable? cloneable? inst? reduced? counted? indexed? fn? empty? coll? set? associative? ifind? sequential?
+        sorted? reduceable? map? record? vector? chunked-seq? false? true? boolean? undefined? seq? seqable? ifn?
+        integer? int? pos-int? neg-int? nat-int? float? double? infinite? pos? zero? neg? list? reversible? keyword?
+        ident? simple-ident? qualified-ident? simple-symbol? qualified-symbol? simple-keyword? qualified-keyword?
+        even? odd? volatile? map-entry? regexp? delay? realized? uuid? special-symbol? tagged-literal? seq))))
+
+(extend-protocol s/Specize
+  default
+  (specize*
+    ([o]
+     (if-let [f-n (and (fn? o)
+                       (or (@fn-syms o)
+                           (#'s/fn-sym (.-name o))))]
+       (s/spec-impl f-n o nil nil)
+       (s/spec-impl ::s/unknown o nil nil)))
+    ([o form] (s/spec-impl form o nil nil))))
+
+;; Prefer ES6 Number.isInteger
+(set! integer? (or (.-isInteger js/Number) integer?))
+
+;; Monkey patch target-specific core fns
+
+(set! array? (fn [x] (instance? js/Array x)))
+
+(set! find-ns-obj (fn [ns] (let [munged-ns (munge (str ns))
+                                 segs (.split munged-ns ".")]
+                             (find-ns-obj* goog/global segs))))
 
 (defn- distinct-by
   "Returns a lazy sequence of the elements of coll, removing any elements that
@@ -111,8 +146,10 @@
             theme      (assoc theme :err-font (:verbose-font theme))]
     (apply println args)))
 
-(declare print-error)
-(declare handle-error)
+(declare ^{:arglists '([error]
+                       [error include-stacktrace?]
+                       [error include-stacktrace? printed-message])} print-error)
+(declare ^{:arglists '([e include-stacktrace?])} handle-error)
 
 (defonce ^:private st (cljs/empty-state))
 
@@ -261,32 +298,106 @@
   []
   (some? (:optimizations @app-env)))
 
+(defn- normalize-closure-defines [defines]
+  (into {}
+    (map (fn [[k v]]
+           [(if (symbol? k) (str (comp/munge k)) k) v])
+      defines)))
+
+(defn- init-closure-defines
+  [defines]
+  (when defines
+    (set! (.. js/goog -global -CLOSURE_UNCOMPILED_DEFINES)
+      (clj->js (normalize-closure-defines defines)))))
+
+(defn- init-warnings
+  [warnings warn-on-undeclared]
+  (set! ana/*cljs-warnings* (merge
+                              ana/*cljs-warnings*
+                              (if (or (true? warnings)
+                                      (false? warnings))
+                                (zipmap (keys ana/*cljs-warnings*) (repeat warnings))
+                                warnings)
+                              (zipmap
+                                [:unprovided :undeclared-var
+                                 :undeclared-ns :undeclared-ns-form]
+                                (repeat (if (false? warnings)
+                                          false
+                                          warn-on-undeclared)))
+                              {:infer-warning false})))
+
+(defn- compile-opts->edns [compile-opts]
+  (cond
+    (string/starts-with? compile-opts "{")
+    [compile-opts]
+
+    (string/includes? compile-opts ":")
+    (mapcat compile-opts->edns (string/split compile-opts #":"))
+
+    (string/starts-with? compile-opts "@")
+    [(first (js/PLANCK_LOAD (subs compile-opts 1)))]
+
+    (string/starts-with? compile-opts "@/")
+    [(first (js/PLANCK_LOAD (subs compile-opts 2)))]
+
+    :else
+    [(first (js/PLANCK_READ_FILE compile-opts))]))
+
+(defn- read-compile-opts [compile-opts]
+  (map r/read-string (compile-opts->edns compile-opts)))
+
+(defn- read-compile-optss [compile-optss]
+  (apply merge (mapcat read-compile-opts compile-optss)))
+
+(def ^:private passthrough-compiler-opts
+  [:spec-skip-macros])
+
+(defn- setup-passthrough-compiler-opts [opts]
+  (swap! st update :options merge (select-keys opts passthrough-compiler-opts)))
+
 (defn- ^:export init
-  [repl verbose cache-path checked-arrays static-fns fn-invoke-direct elide-asserts optimizations]
+  [repl verbose cache-path checked-arrays static-fns fn-invoke-direct elide-asserts optimizations compile-optss]
   (when (exists? *command-line-args*)
     (set! ^:cljs.analyzer/no-resolve *command-line-args* (-> js/PLANCK_INITIAL_COMMAND_LINE_ARGS js->clj seq)))
   (load-core-analysis-caches repl)
-  (let [opts (or (read-opts-from-file "opts.clj")
-                 {})]
-    (reset! planck.repl/app-env (merge {:repl       repl
-                                        :verbose    verbose
-                                        :cache-path cache-path
-                                        :opts       opts}
+  (let [opts (merge {}
+               (read-compile-optss compile-optss)
+               (read-opts-from-file "opts.clj"))]
+    (setup-passthrough-compiler-opts opts)
+    (reset! planck.repl/app-env (merge {:repl          repl
+                                        :verbose       verbose
+                                        :cache-path    cache-path
+                                        :elide-asserts elide-asserts
+                                        :opts          opts}
+                                  (when (contains? opts :verbose)
+                                    {:verbose (:verbose opts)})
                                   (when checked-arrays
                                     {:checked-arrays (keyword checked-arrays)})
+                                  (when (contains? opts :checked-arrays)
+                                    {:checked-arrays (:checked-arrays opts)})
                                   (when static-fns
                                     {:static-fns true})
+                                  (when (contains? opts :static-fns)
+                                    {:static-fns (:static-fns opts)})
+                                  (when fn-invoke-direct
+                                    {:fn-invoke-direct true})
+                                  (when (contains? opts :fn-invoke-direct)
+                                    {:fn-invoke-direct opts})
+                                  (when (contains? opts :elide-asserts)
+                                    {:elide-asserts (:elide-asserts opts)})
                                   (when (not= optimizations "none")
                                     {:optimizations (keyword optimizations)})
-                                  (when fn-invoke-direct
-                                    {:fn-invoke-direct true})))
-    (deps/index-foreign-libs opts)
+                                  (when (contains? opts :optimizations)
+                                    {:optimizations (:optimizations opts)})))
+    (init-closure-defines (:closure-defines opts))
+    (init-warnings (:warnings opts) (:warn-on-undeclared opts true))
+    (deps/index-opts opts)
     (deps/index-js-libs)
     (let [index @deps/js-lib-index]
       (swap! st assoc :js-dependency-index (into index
                                              (map (fn [[k v]] [(str k) v]))
                                              index))))
-  (setup-asserts elide-asserts)
+  (setup-asserts (:elide-asserts @planck.repl/app-env))
   (setup-print-namespace-maps repl))
 
 (defn- read-chars
@@ -304,6 +415,60 @@
     (ex-info (str (ex-message e) ".") (ex-data e) e)
     e))
 
+(declare ^{:arglists '([])} make-base-eval-opts)
+
+(defn- ensure-ns [ns-name]
+  (when (not-any? #{ns-name} (all-ns))
+    (let [ns-form `(~'ns ~ns-name)]
+      (cljs/eval
+        st
+        ns-form
+        (make-base-eval-opts)
+        (fn [{e :error}]
+          (when e
+            (print-error e false))))))
+  ns-name)
+
+(declare ^{:arglists '([ns name] [ns name val])} intern)
+
+(defn- data-reader-var [sym]
+  (intern (ensure-ns (symbol (namespace sym)))
+    (symbol (name sym))))
+
+(defn- get-data-readers
+  "Returns the merged data reader mappings."
+  []
+  (try
+    (reduce (fn [data-readers [url source]]
+              (let [mappings (r/read-string source)]
+                (when-not (map? mappings)
+                  (throw (ex-info (str "Not a valid data-reader map")
+                           {:url url})))
+                (reduce-kv (fn [data-readers tag fn-sym]
+                             (when-not (symbol? tag)
+                               (throw (ex-info (str "Invalid form in data-reader file")
+                                        {:url  url
+                                         :form tag})))
+                             (let [fn-var (data-reader-var fn-sym)]
+                               (when (and (get data-readers tag)
+                                          (not= (get mappings tag) fn-var))
+                                 (throw (ex-info "Conflicting data-reader mapping"
+                                          {:url      url
+                                           :conflict tag
+                                           :mappings data-readers})))
+                               (assoc data-readers tag fn-var)))
+                  data-readers
+                  mappings)))
+      {}
+      (js/PLANCK_LOAD_DATA_READERS_FILES))
+    (catch :default e
+      (print-error e :pst))))
+
+(def ^:private ^:dynamic *data-readers* nil)
+
+(defn- data-readers []
+  (merge tags/*cljs-data-readers* *data-readers*))
+
 (defn- repl-read-string
   "Returns a vector of the first read form, and any balance text."
   [source]
@@ -311,13 +476,13 @@
     (binding [ana/*cljs-ns*    @current-ns
               *ns*             (create-ns @current-ns)
               env/*compiler*   st
-              r/*data-readers* tags/*cljs-data-readers*
+              r/*data-readers* (data-readers)
               r/resolve-symbol ana/resolve-symbol
               r/*alias-map*    (current-alias-map)]
       (let [reader (rt/string-push-back-reader source)]
         [(r/read {:read-cond :allow :features #{:cljs}} reader) (apply str (read-chars reader))]))
     (catch :default e
-      (throw (ensure-period e)))))
+      (throw (ex-info nil {:clojure.error/phase :read-source} (ensure-period e))))))
 
 (def ^:private eof (js-obj))
 
@@ -331,7 +496,7 @@
   (try
     (first (repl-read-string source-text))
     (catch :default e
-      (if (eof-while-reading? e)
+      (if (eof-while-reading? (ex-cause e))
         eof
         (throw e)))))
 
@@ -343,21 +508,41 @@
     (second (repl-read-string source))
     (catch :default e
       (cond
-        (eof-while-reading? e) nil
+        (eof-while-reading? (ex-cause e)) nil
         :else ""))))
+
+(defn- seq-form-starting-with-sym?
+  [form sym]
+  (and (seq? form) (= sym (first form))))
 
 (defn- ns-form?
   [form]
-  (and (seq? form) (= 'ns (first form))))
+  (seq-form-starting-with-sym? form 'ns))
+
+(defn- require-form?
+  [form]
+  (seq-form-starting-with-sym? form 'require))
 
 (defn- extract-namespace
   [source]
-  (try
-    (let [first-form (first (repl-read-string source))]
-      (when (ns-form? first-form)
-        (second first-form)))
-    (catch :default _
-      nil)))
+  "Extracts the namespace for source text, scanning for the first ns or
+  require form."
+  (let [[first-form rest-source] (try
+                                   (repl-read-string source)
+                                   (catch :default _
+                                     nil))]
+    (cond
+      (ns-form? first-form)
+      (second first-form)
+
+      (require-form? first-form)
+      'cljs.user
+
+      (string/blank? rest-source)
+      'cljs.user
+
+      :else
+      (recur rest-source))))
 
 (defn- repl-special?
   [form]
@@ -375,12 +560,17 @@
     :name name-symbol
     :repl-special-function true))
 
+(defn- source-map? []
+  (if-some [source-map (-> @app-env :opts :source-map)]
+    (boolean source-map)
+    true))
+
 (defn- make-base-eval-opts
   []
   (merge
     {:ns         @current-ns
      :context    :expr
-     :source-map true}
+     :source-map (source-map?)}
     (select-keys @app-env [:verbose :checked-arrays :static-fns :fn-invoke-direct])))
 
 (defn- process-in-ns
@@ -611,7 +801,7 @@
     (binding [ana/*cljs-ns*    @current-ns
               *ns*             (create-ns @current-ns)
               env/*compiler*   st
-              r/*data-readers* tags/*cljs-data-readers*
+              r/*data-readers* (data-readers)
               r/resolve-symbol ana/resolve-symbol
               r/*alias-map*    (current-alias-map)]
       (try
@@ -680,14 +870,14 @@
   ([] (form-compiled-by-string nil))
   ([opts]
    (str "// Compiled by ClojureScript "
-     (or *clojurescript-version* "0.0.0000")
+     *clojurescript-version*
      (when opts
        (str " " (pr-str opts))))))
 
 (defn- read-build-affecting-options
   [source]
   (let [rdr (rt/indexing-push-back-reader source 1 "noname")]
-    (binding [r/*data-readers* tags/*cljs-data-readers*]
+    (binding [r/*data-readers* (data-readers)]
       (try
         (r/read {:eof (js-obj)} rdr)
         (catch :default _
@@ -717,7 +907,7 @@
 ;; Hack to remember which file path each namespace was loaded from
 (defonce ^:private name-path (atom {}))
 
-(declare add-suffix)
+(declare ^{:arglists '([file suffix])} add-suffix)
 
 (defn- js-path-for-name
   [name]
@@ -741,14 +931,15 @@
         (when sourcemap-json "and source map ")
         "for " path))))
 
-(declare strip-source-map)
+(declare ^{:arglists '([sm])} strip-source-map)
 
 (defn- write-cache
   [path name source cache]
   (when (and path source cache (:cache-path @app-env))
     (let [cache-json     (cljs->transit-json cache)
-          sourcemap-json (when-let [sm (get-in @planck.repl/st [:source-maps (:name cache)])]
-                           (cljs->transit-json (strip-source-map sm)))]
+          sourcemap-json (when (source-map?)
+                           (when-let [sm (get-in @planck.repl/st [:source-maps (:name cache)])]
+                             (cljs->transit-json (strip-source-map sm))))]
       (log-cache-activity :write path cache-json sourcemap-json)
       (js/PLANCK_CACHE (cache-prefix-for-path path (is-macros? cache))
         (str (form-compiled-by-string (form-build-affecting-options)) "\n" source)
@@ -791,8 +982,9 @@
   [m]
   (if (and (not (= :js (:lang m)))
            (:cache m))
-    (let [{:keys [source source-map]} (compile (assoc m
-                                                 :sm-data @comp/*source-map-data*))]
+    (let [{:keys [source source-map]} (compile (cond-> m
+                                                 (source-map?)
+                                                 (assoc :sm-data @comp/*source-map-data*)))]
       (when source-map
         (swap! st assoc-in [:source-maps (:name (:cache m))] source-map))
       (assoc m :source source))
@@ -859,8 +1051,9 @@
                                     (js/PLANCK_READ_FILE (str cache-prefix ".js")))
         [cache-json _] (or (raw-load (str path ".cache.json"))
                            (js/PLANCK_READ_FILE (str cache-prefix ".cache.json")))
-        [sourcemap-json _] (or (raw-load (str path ".js.map.json"))
-                               (js/PLANCK_READ_FILE (str cache-prefix ".js.map.json")))]
+        [sourcemap-json _] (when (source-map?)
+                             (or (raw-load (str path ".js.map.json"))
+                                 (js/PLANCK_READ_FILE (str cache-prefix ".js.map.json"))))]
     (when (cached-js-valid? js-source js-modified source-modified)
       (log-cache-activity :read path cache-json sourcemap-json)
       (when (and sourcemap-json aname)
@@ -875,14 +1068,14 @@
             (cljs/load-analysis-cache! st aname cache)
             {:cache cache}))))))
 
-(declare inject-planck-eval)
-
 (defn- load-and-callback!
-  [name path macros lang cache-prefix cb]
-  (let [[raw-load [source modified loaded-path]] [js/PLANCK_LOAD (js/PLANCK_LOAD path)]
+  [name path load-domain macros lang cache-prefix cb]
+  (let [[raw-load [source modified loaded-path]] [js/PLANCK_LOAD (when (contains? #{:classpath nil} load-domain)
+                                                                   (js/PLANCK_LOAD path))]
         [raw-load [source modified loaded-path]] (if source
                                                    [raw-load [source modified loaded-path]]
-                                                   [js/PLANCK_READ_FILE (js/PLANCK_READ_FILE path) path])]
+                                                   [js/PLANCK_READ_FILE (when (contains? #{:filesystem nil} load-domain)
+                                                                          (js/PLANCK_READ_FILE path)) path])]
     (when source
       (when name
         (swap! name-path assoc name path))
@@ -892,8 +1085,6 @@
              :file   loaded-path}
             (when-not (= :js lang)
               (cached-callback-data name path macros cache-prefix source modified raw-load))))
-      (when (and (= name 'cljs.spec.test.alpha) macros)
-        (inject-planck-eval 'cljs.spec.test.alpha$macros))
       :loaded)))
 
 (defn- closure-index* []
@@ -921,22 +1112,19 @@
    (= name 'cljsjs.parinfer)
    (= name 'cljs.core)
    (and (= name 'clojure.core.rrb-vector.macros) macros)
-   (and (= name 'cljs.env.macros) macros)
-   (and (= name 'cljs.analyzer.macros) macros)
-   (and (= name 'cljs.compiler.macros) macros)
    (and (= name 'cljs.js) macros)
-   (and (= name 'cljs.pprint) macros)
    (and (= name 'cljs.reader) macros)
+   (and (= name 'cljs.repl) macros)
    (and (= name 'cljs.tools.reader.reader-types) macros)
    (and (= name 'tailrecursion.cljson) macros)
    (and (= name 'lazy-map.core) macros)))
 
 (defn- load-file
-  [file cb]
-  (when-not (load-and-callback! nil file false :clj :calculate-cache-prefix cb)
+  [file load-domain cb]
+  (when-not (load-and-callback! nil file load-domain false :clj :calculate-cache-prefix cb)
     (cb nil)))
 
-(declare goog-dep-source)
+(declare ^{:arglists '([name])} goog-dep-source)
 
 (defn- load-minified-libs?
   [opts]
@@ -952,7 +1140,7 @@
                             (concat (->> requires
                                       (filter #(string/starts-with? % "goog."))
                                       (map (comp goog-dep-source symbol)))
-                              [(first (js/PLANCK_LOAD file))])))
+                              [(first (or (js/PLANCK_LOAD file) (js/PLANCK_READ_FILE file)))])))
                   (deps/js-libs-to-load name))]
     (cb {:lang :js
          :source (string/join "\n" sources)})
@@ -993,6 +1181,7 @@
       (when-not (load-and-callback!
                   name
                   (str path (first extensions))
+                  nil
                   macros
                   (extension->lang (first extensions))
                   (cache-prefix-for-path path macros)
@@ -1009,9 +1198,9 @@
 
 ; file here is an alternate parameter denoting a filesystem path
 (defn- load
-  [{:keys [name macros path file] :as full} opts cb]
+  [{:keys [name macros path file load-domain] :as full} opts cb]
   (cond
-    file (load-file file cb)
+    file (load-file file load-domain cb)
     (skip-load? full) (cb {:lang   :js
                            :source ""})
     (re-matches #"^goog/.*" path) (load-goog name cb)
@@ -1027,16 +1216,14 @@
   [m cb]
   (load m (load-opts) cb))
 
-(declare skip-cljsjs-eval-error)
+(declare ^{:arglists '([error])} skip-cljsjs-eval-error)
 
 (defn- handle-error
   [e include-stacktrace?]
-  (let [cause                     (or (.-cause e) e)
-        is-planck-exit-exception? (= "PLANCK_EXIT" (.-message cause))]
-    (when-not is-planck-exit-exception?
-      (print-error e include-stacktrace?))
-    (if (and (not is-planck-exit-exception?) (not (:repl @app-env)))
-      (js/PLANCK_SET_EXIT_VALUE 1)
+  (do
+    (print-error e include-stacktrace?)
+    (if (not (:repl @app-env))
+      (js/PLANCK_EXIT_WITH_VALUE 1)
       (set! *e (skip-cljsjs-eval-error e)))))
 
 (defn- get-eval-fn []
@@ -1075,80 +1262,27 @@
     (run-main-impl *main-cli-fn* *command-line-args*)))
 
 (defn- load-bundled-source-maps!
-  []
-  (when-not (get (:source-maps @planck.repl/st) 'cljs.core)
+  [ns-syms]
+  (when (source-map?)
     (let [source-map-path  (fn [ns-sym]
                              (str (cljs.js/ns->relpath ns-sym) ".js.map"))
           load-source-maps (fn [ns-sym]
-                             (when-let [sm-text (->> ns-sym
+                             (when-not (get-in @st [:source-maps ns-sym])
+                               (if-let [sm-text (->> ns-sym
                                                   source-map-path
                                                   js/PLANCK_LOAD
                                                   first)]
-                               ;; Detect if we have source maps in need of decoding
-                               ;; or if they are AOT decoded.
-                               (if (or (string/starts-with? sm-text "{\"version\"")
-                                       (string/starts-with? sm-text "{\n\"version\""))
-                                 (cljs/load-source-map! st ns-sym (->> ns-sym
-                                                                    source-map-path
-                                                                    js/PLANCK_LOAD
-                                                                    first))
-                                 (swap! st assoc-in [:source-maps ns-sym] (transit-json->cljs sm-text)))))]
-      ;; Source maps for bundled macros namespaces other than cljs.core are loaded
-      ;; via their cached ".js.map.json" file.
-      (doseq [ns-sym '[cljs.core
-                       cljs.core$macros
-                       cljs.analyzer.api
-                       cljs.compiler
-                       cljs.env
-                       cljs.js
-                       cljs.pprint
-                       cljs.reader
-                       cljs.source-map
-                       cljs.source-map.base64
-                       cljs.source-map.base64-vlq
-                       cljs.spec.alpha
-                       cljs.spec.gen.alpha
-                       cljs.spec.test.alpha
-                       cljs.stacktrace
-                       cljs.tagged-literals
-                       cljs.test
-                       cljs.tools.reader
-                       cljs.tools.reader.impl.commons
-                       cljs.tools.reader.impl.utils
-                       cljs.tools.reader.reader-types
-                       clojure.core.reducers
-                       clojure.core.rrb-vector
-                       clojure.core.rrb-vector.interop
-                       clojure.core.rrb-vector.nodes
-                       clojure.core.rrb-vector.protocols
-                       clojure.core.rbb-vector.rbbt
-                       clojure.core.rbb-vector.transients
-                       clojure.core.rrb-vector.trees
-                       clojure.data
-                       clojure.set
-                       clojure.string
-                       clojure.walk
-                       clojure.zip
-                       cognitect.transit
-                       fipp.clojure
-                       fipp.deque
-                       fipp.edn
-                       fipp.ednize
-                       fipp.visit
-                       lazy-map.core
-                       planck.core
-                       planck.from.io.aviso.ansi
-                       planck.http
-                       planck.io
-                       planck.js-deps
-                       planck.pprint.code
-                       planck.pprint.data
-                       planck.pprint.width-adjust
-                       planck.repl
-                       planck.repl-resources
-                       planck.shell
-                       planck.themes]]
-        (load-source-maps ns-sym)))))
+                                 ;; Detect if we have source maps in need of decoding
+                                 ;; or if they are AOT decoded.
+                                 (if (or (string/starts-with? sm-text "{\"version\"")
+                                         (string/starts-with? sm-text "{\n\"version\""))
+                                   (cljs/load-source-map! st ns-sym sm-text)
+                                   (swap! st assoc-in [:source-maps ns-sym] (transit-json->cljs sm-text)))
+                                 (swap! st assoc-in [:source-maps ns-sym] {}))))]
+      (run! load-source-maps ns-syms))))
+
+(defn- load-core-macros-source-maps! []
+  (load-bundled-source-maps! '[cljs.core$macros]))
 
 (defonce ^:dynamic ^:private *planck-integration-tests* false)
 
@@ -1182,7 +1316,7 @@
   [ns]
   {:pre [(symbol? ns)]}
   (let [ns-str        (str ns)
-        munged-ns-str (string/replace ns-str #"\." "$")]
+        munged-ns-str (string/escape ns-str {\- \_ \. \$})]
     (into {} (for [sym (ns-syms ns)]
                [(str munged-ns-str "$" (munge sym)) (symbol ns-str (str sym))]))))
 
@@ -1231,13 +1365,57 @@
                munged-sym
                (demunge munged-sym))))))
 
+;; Revise mapped-frame so it doesn't automatically assume source files are .cljs
+;; Hack by checking to see if .cljs file exists
+(defn- mapped-frame
+  [{:keys [function file line column]} sms opts]
+  (let [no-source-file?      (if-not file true (string/starts-with? file "<"))
+        [line' column' call] (if no-source-file?
+                               [line column nil]
+                               (st/mapped-line-column-call sms file line column))
+        exists?              (fn [file] (some? (js/PLANCK_LOAD file)))
+        file'                (when-not no-source-file?
+                               (if (string/ends-with? file ".js")
+                                 (let [cljs-file (str (subs file 0 (- (count file) 3)) ".cljs")]
+                                   (if (exists? cljs-file)
+                                     cljs-file
+                                     file))
+                                 file))]
+    {:function function
+     :call     call
+     :file     (if no-source-file?
+                 (str "NO_SOURCE_FILE" (when file (str " " file)))
+                 file')
+     :line     line'
+     :column   column'}))
+
+;; Monkey-patch mapped-frame
+(set! st/mapped-frame mapped-frame)
+
+(defn- js-file? [file]
+  (string/ends-with? file ".js"))
+
+(defn- file->ns-sym [file]
+  (-> file
+    st/remove-ext
+    (string/replace "/" ".")
+    (string/replace "_" "-")
+    symbol))
+
+(defn- qualify [name file]
+  (cond->> name
+    (not (or (string/includes? name "/")
+             (js-file? file)))
+    (str (file->ns-sym file) "/")))
+
 (defn- mapped-stacktrace-str
   ([stacktrace sms]
    (mapped-stacktrace-str stacktrace sms nil))
   ([stacktrace sms opts]
    (apply str
      (for [{:keys [function file line column]} (st/mapped-stacktrace stacktrace sms opts)
-           :let [demunged (str (when function (demunge-sym function)))]
+           :let [demunged (-> (str (when function (demunge-sym function)))
+                            (qualify file))]
            :when (not= demunged "cljs.core/-invoke [cljs.core/IFn]")]
        (str \tab demunged " (" file (when line (str ":" line))
          (when column (str ":" column)) ")" \newline)))))
@@ -1294,7 +1472,7 @@
                (show-indicator?))
       (println ((:rdr-ann-err-fn theme) indicator)))))
 
-(declare print-value)
+(declare ^{:arglists '([value opts])} print-value)
 
 (defn- file-path
   [name]
@@ -1308,6 +1486,48 @@
                (:file data))
       (str " at line " (:line data) " " (file-path (:file data))))))
 
+(def ^:private stack-truncation-functions
+  #{"PLANCK_EVAL"
+    "global code"
+    "planck$repl$run_main_impl"
+    "planck$pprint$width_adjust$force_eval"
+    "planck$repl$print_value"
+    "fipp$visit$IVisitor$visit_seq$arity$2"})
+
+(defn- explain-printer
+  [ed]
+  (let [pr'     #(print-value %
+                   {::no-newline? true
+                    ::keyword-ns @current-ns
+                    ::as-code?    true})
+        pr-str' #(with-out-str (pr' %))]
+    (if ed
+      (let [problems (->> (::s/problems ed)
+                       (sort-by #(- (count (:in %))))
+                       (sort-by #(- (count (:path %)))))]
+        (print
+          (with-out-str
+            ;;(prn {:ed ed})
+            (doseq [{:keys [path pred val reason via in] :as prob} problems]
+              (pr' val)
+              (print " - failed: ")
+              (if reason (print reason) (pr' (s/abbrev pred)))
+              (when-not (empty? in)
+                (print (str " in: " (pr-str' in))))
+              (when-not (empty? path)
+                (print (str " at: " (pr-str' path))))
+              (when-not (empty? via)
+                (print (str " spec: " (pr-str' (last via)))))
+              (doseq [[k v] prob]
+                (when-not (#{:path :pred :val :reason :via :in} k)
+                  (print "\n\t" (pr-str' k) " ")
+                  (pr' v)))
+              (newline)))))
+      (println "Success!"))))
+
+;; Make the Planck explain printer be the default one, but yet still overridable
+(set! s/*explain-out* explain-printer)
+
 (defn- print-error
   ([error]
    (print-error error true))
@@ -1315,40 +1535,48 @@
    (print-error error include-stacktrace? nil))
   ([error include-stacktrace? printed-message]
    (print-error-column-indicator error)
-   (let [error               (skip-cljsjs-eval-error error)
-         roa?                (reader-or-analysis? error)
-         print-ex-data?      (= include-stacktrace? :pst)
-         include-stacktrace? (or (= include-stacktrace? :pst)
-                                 (and include-stacktrace?
-                                      (not roa?)))
-         include-stacktrace? (if *planck-integration-tests*
-                               false
-                               include-stacktrace?)
-         message             (if (instance? ExceptionInfo error)
-                               (ex-message error)
-                               (.-message error))]
-     (when (or (not ((fnil string/starts-with? "") printed-message message))
-               include-stacktrace?)
-       (println (((if roa? :rdr-ann-err-fn :ex-msg-fn) theme)
-                 (str message (when (reader-error? error)
-                                (location-info error))))))
-     (when-let [data (and print-ex-data? (ex-data error))]
-       (print-value data {::as-code? false}))
-     (when include-stacktrace?
-       (load-bundled-source-maps!)
-       (let [canonical-stacktrace (st/parse-stacktrace
-                                    {}
-                                    (.-stack error)
-                                    {:ua-product :safari}
-                                    {:output-dir "file://(/goog/..)?"})]
-         (println
-           ((:ex-stack-fn theme)
-            (mapped-stacktrace-str
-              canonical-stacktrace
-              (or (:source-maps @planck.repl/st) {})
-              nil)))))
-     (when-let [cause (.-cause error)]
-       (recur cause include-stacktrace? message)))))
+   (if (= include-stacktrace? :pst)
+     (let [error               (skip-cljsjs-eval-error error)
+           roa?                (reader-or-analysis? error)
+           print-ex-data?      (= include-stacktrace? :pst)
+           include-stacktrace? (or (= include-stacktrace? :pst)
+                                   (and include-stacktrace?
+                                        (not roa?)))
+           include-stacktrace? (if *planck-integration-tests*
+                                 false
+                                 include-stacktrace?)
+           message             (if (instance? ExceptionInfo error)
+                                 (ex-message error)
+                                 (.-message error))]
+       (when (or (not ((fnil string/starts-with? "") printed-message message))
+                 include-stacktrace?)
+         (println (((if roa? :rdr-ann-err-fn :ex-msg-fn) theme)
+                   (str message (when (reader-error? error)
+                                  (location-info error))))))
+       (when-let [data (and print-ex-data? (ex-data error))]
+         (print-value data {::as-code? false}))
+       (when include-stacktrace?
+         (load-core-macros-source-maps!)
+         (let [canonical-stacktrace (->> (st/parse-stacktrace
+                                           {}
+                                           (.-stack error)
+                                           {:ua-product :safari}
+                                           {:output-dir "file://(/goog/..)?"})
+                                      (drop-while #(string/starts-with? (:function %) "PLANCK_"))
+                                      (take-while #(not (stack-truncation-functions (:function %)))))]
+           (load-bundled-source-maps! (distinct (map file->ns-sym (keep :file canonical-stacktrace))))
+           (println
+             ((:ex-stack-fn theme)
+              (mapped-stacktrace-str
+                canonical-stacktrace
+                (or (:source-maps @planck.repl/st) {})
+                nil)))))
+       (when-let [cause (.-cause error)]
+         (recur cause include-stacktrace? message)))
+     (let [error (cond-> error
+                   (-> (ex-data (ex-cause error)) (contains? :clojure.error/phase))
+                   ex-cause)]
+       (print (cljs.repl/error->str error))))))
 
 (defn- get-macro-var
   [env sym macros-ns]
@@ -1415,12 +1643,14 @@
       (cb nil))))
 
 ; Monkey-patch cljs.js/run-async! to instead be our more stack-efficient run-sync!
-(set! cljs/run-async! run-sync!)
+(set! ^:private-var-access-nowarn cljs/run-async! run-sync!)
 
 (defn- process-deps
   [names opts cb]
   (run-sync! (fn [name cb]
-               (cljs/require name opts cb))
+               (cljs/require {:*compiler* st
+                              :*cljs-dep-set* ana/*cljs-dep-set*}
+                 name opts cb))
     names
     :error
     cb))
@@ -1433,12 +1663,27 @@
   [cache cb]
   (process-deps (distinct (concat (vals (:requires cache)) (vals (:imports cache)))) {} cb))
 
-(declare execute-source)
+(declare ^{:arglists '([source opts])} execute-source)
+
+(defn- with-load-domain
+  [file]
+  (cond
+    (string/starts-with? file "@")
+    {:file (subs file 1)
+     :load-domain :classpath}
+
+    (string/starts-with? file "@/")
+    {:file (subs file 2)
+     :load-domain :classpath}
+
+    :else
+    {:file file
+     :load-domain :filesystem}))
 
 (defn- process-execute-path
   [file opts]
   (binding [theme (assoc theme :err-font (:verbose-font theme))]
-    (load-fn {:file file}
+    (load-fn (with-load-domain file)
       (fn [{:keys [lang source source-url cache]}]
         (if source
           (case lang
@@ -1451,7 +1696,10 @@
                         (fn [res]
                           (if-let [error (:error res)]
                             (handle-error (js/Error. error) false)
-                            (js-eval source source-url))))))))
+                            (do
+                              (js-eval source source-url)
+                              (when-some [ns (:name cache)]
+                                (swap! st assoc-in [::ana/namespaces ns] cache))))))))))
           (handle-error (js/Error. (str "Could not load file " file)) false))))))
 
 (defn- resolve-ns
@@ -1462,7 +1710,7 @@
       (get-in @st [::ana/namespaces ana/*cljs-ns* :require-macros ns-sym])
       ns-sym))
 
-(defn- dir*
+(defn dir*
   [nsname]
   (let [ns (resolve-ns nsname)]
     (run! prn
@@ -1470,7 +1718,7 @@
                         (public-syms ns)
                         (public-syms (add-macros-suffix ns))))))))
 
-(defn- apropos*
+(defn apropos*
   [str-or-pattern]
   (let [matches? (if (instance? js/RegExp str-or-pattern)
                    #(re-find str-or-pattern (str %))
@@ -1511,7 +1759,9 @@
 
 (defn- print-doc [{n :ns nm :name :as m}]
   (println "-------------------------")
-  (println (str (when-let [ns (:ns m)] (str ns "/")) (:name m)))
+  (if-let [spec (:spec m)]
+    (print-value spec {})
+    (println (str (when-let [ns (:ns m)] (str ns "/")) (:name m))))
   (when (:protocol m)
     (println "Protocol"))
   (cond
@@ -1537,6 +1787,8 @@
     (do
       (when (:macro m)
         (println "Macro"))
+      (when (:spec m)
+        (println "Spec"))
       (when (:repl-special-function m)
         (println "REPL Special Function"))
       (println " " (:doc m))
@@ -1558,33 +1810,36 @@
                 (print (str "\n " (name role) ":") (format-spec spec (+ 3 (count (name role))) n))))
             (println)))))))
 
-(defn- doc*
-  [sym]
-  (if-let [special-sym ('{&       fn
-                          catch   try
-                          finally try} sym)]
-    (doc* special-sym)
+(defn doc*
+  [name]
+  (if-let [special-name ('{&       fn
+                           catch   try
+                           finally try} name)]
+    (doc* special-name)
     (cond
 
-      (special-doc-map sym)
-      (print-doc (special-doc sym))
+      (special-doc-map name)
+      (print-doc (special-doc name))
 
-      (repl-special-doc-map sym)
-      (print-doc (repl-special-doc sym))
+      (repl-special-doc-map name)
+      (print-doc (repl-special-doc name))
 
-      (get-namespace sym)
+      (qualified-keyword? name)
+      (print-doc {:spec name :doc (format-spec (s/get-spec name) 3 (symbol (namespace name)))})
+
+      (get-namespace name)
       (print-doc
-        (select-keys (get-namespace sym) [:name :doc]))
+        (select-keys (get-namespace name) [:name :doc]))
 
-      (get-var (get-aenv) sym)
+      (get-var (get-aenv) name)
       (print-doc
-        (let [var (get-var (get-aenv) sym)
+        (let [var (get-var (get-aenv) name)
               var (assoc var :forms (-> var :meta :forms second)
                              :arglists (-> var :meta :arglists second))
               m   (select-keys var
                     [:ns :name :doc :forms :arglists :macro :url])
               m   (update m :doc undo-reader-conditional-whitespace-docstring)]
-          (cond-> (update-in m [:name] name)
+          (cond-> (update-in m [:name] cljs.core/name)
             (:protocol-symbol var)
             (assoc :protocol true
                    :methods
@@ -1599,7 +1854,7 @@
 (defn- namespace-doc [nspace]
   (select-keys (get-in @st [::ana/namespaces nspace]) [:name :doc]))
 
-(defn- find-doc*
+(defn find-doc*
   [re-string-or-pattern]
   (let [re (re-pattern re-string-or-pattern)
         ms (concat (mapcat #(sort-by :name
@@ -1615,12 +1870,12 @@
                            (re-find re (str (:name m)))))]
       (doc* (:name m)))))
 
-(defn- source*
+(defn source*
   [sym]
   (println (or (fetch-source (get-var (get-aenv) sym))
                "Source not found")))
 
-(defn- pst*
+(defn pst*
   ([]
    (pst* '*e))
   ([expr]
@@ -1660,8 +1915,8 @@
               path
               (str (root-directory @current-ns) \/ path))
         src (.substring src 1)]
-    (or (and (first (js/PLANCK_LOAD (str src ".cljs"))) (str src ".cljs"))
-        (str src ".cljc"))))
+    (or (and (first (js/PLANCK_LOAD (str src ".cljs"))) (str "@" src ".cljs"))
+        (str "@" src ".cljc"))))
 
 (defn- process-load
   [paths opts]
@@ -1734,9 +1989,9 @@
 
 (defn- process-1-2-3
   [expression-form value]
-  (when-not
-   (or ('#{*1 *2 *3 *e} expression-form)
-       (ns-form? expression-form))
+  (when (and (:repl @app-env)
+             (not ('#{*1 *2 *3 *e} expression-form))
+             (not (ns-form? expression-form)))
     (set! *3 *2)
     (set! *2 *1)
     (set! *1 value)))
@@ -1759,12 +2014,15 @@
          (if (::as-code? opts)
            planck.pprint.code/pprint
            planck.pprint.data/pprint))
-       value {:width      ((fnil + 0) term-width (::term-width-adj opts))
-              :theme      theme
-              :spec?      (::spec? opts)
-              :keyword-ns (::keyword-ns opts)})
-      (prn value))
-    (prn value)))
+       value {:width       ((fnil + 0 0) term-width (::term-width-adj opts))
+              :theme       theme
+              :spec?       (::spec? opts)
+              :keyword-ns  (::keyword-ns opts)
+              :no-newline? true})
+      (pr value))
+    (pr value))
+  (when-not (::no-newline? opts)
+    (newline)))
 
 (s/def ::as-code? boolean?)
 (s/def ::spec? boolean?)
@@ -1811,12 +2069,24 @@
   [expression-form]
   (call-form? expression-form '#{def defn defn- defonce defmulti defmacro}))
 
+(defn- compiler-state-memo
+  []
+  {:st     @st
+   :loaded @cljs/*loaded*})
+
+(defn- restore-compiler-state
+  [memo]
+  (reset! st (:st memo))
+  (reset! cljs/*loaded* (:loaded memo)))
+
 (defn- process-execute-source
   [source-text expression-form
    {:keys [expression? print-nil-expression? include-stacktrace? source-path session-id] :as opts}]
   (try
     (set-session-state-for-session-id session-id)
-    (let [initial-ns @current-ns]
+    (let [initial-ns @current-ns
+          memo       (when (and expression? (load-form? expression-form))
+                       (compiler-state-memo))]
       (binding [ana/*cljs-warning-handlers* (if expression?
                                               [warning-handler]
                                               [ana/default-warning-handler])]
@@ -1833,10 +2103,10 @@
             (select-keys @app-env [:verbose :checked-arrays :static-fns :fn-invoke-direct])
             (if expression?
               (merge {:context       :expr
-                      :def-emits-var true}
+                      :def-emits-var (-> @app-env :opts (:def-emits-var true))}
                 (when (load-form? expression-form)
-                  {:source-map true}))
-              (merge {:source-map true}
+                  {:source-map (source-map?)}))
+              (merge {:source-map (source-map?)}
                 (when (:cache-path @app-env)
                   {:cache-source (cache-source-fn source-text)}))))
           (fn [{:keys [ns value error] :as ret}]
@@ -1852,67 +2122,34 @@
                 (reset! current-ns ns)
                 nil))
             (when error
+              (when memo
+                (restore-compiler-state memo))
               (handle-error error include-stacktrace?))))))
     (catch :default e
       (handle-error e include-stacktrace?))
     (finally (capture-session-state-for-session-id session-id))))
 
 (defn- execute-source
-  [[source-type source-value] {:keys [expression?] :as opts}]
-  (binding [ana/*cljs-ns*    @current-ns
-            *ns*             (create-ns @current-ns)
-            cljs/*load-fn*   load-fn
-            cljs/*eval-fn*   (get-eval-fn)
-            r/*data-readers* tags/*cljs-data-readers*]
-    (if-not (= "text" source-type)
-      (process-execute-path source-value (assoc opts :source-path source-value))
-      (let [source-text source-value
-            first-form  (eof-guarded-read source-text)]
-        (when (not= eof first-form)
-          (let [expression-form (and expression? first-form)]
-            (if (repl-special? expression-form)
-              (process-repl-special expression-form opts)
-              (process-execute-source source-text expression-form opts))))))))
-
-
-;; The following volatiles and fns set up a scheme to
-;; emit function values into JavaScript as numeric
-;; references that are looked up.
-
-(defonce ^:private fn-index (volatile! 0))
-(defonce ^:private fn-refs (volatile! {}))
-
-(defn- clear-fns!
-  "Clears saved functions."
-  []
-  (vreset! fn-refs {}))
-
-(defn- put-fn
-  "Saves a function, returning a numeric representation."
-  [f]
-  (let [n (vswap! fn-index inc)]
-    (vswap! fn-refs assoc n f)
-    n))
-
-(defn- get-fn
-  "Gets a function, given its numeric representation."
-  [n]
-  (get @fn-refs n))
-
-(defn- emit-fn [f]
-  (print "planck.repl.get_fn(" (put-fn f) ")"))
-
-(defmethod comp/emit-constant js/Function
-  [f]
-  (emit-fn f))
-
-(defmethod comp/emit-constant cljs.core/Var
-  [f]
-  (emit-fn f))
+  [source opts]
+  (let [[source-type source-value] source
+        {:keys [expression?]} opts]
+    (binding [ana/*cljs-ns*    @current-ns
+              *ns*             (create-ns @current-ns)
+              cljs/*load-fn*   load-fn
+              cljs/*eval-fn*   (get-eval-fn)
+              tags/*cljs-data-readers* (data-readers)]
+      (case source-type
+        "path" (process-execute-path source-value (assoc opts :source-path source-value))
+        "text" (let [source-text source-value
+                     first-form  (eof-guarded-read source-text)]
+                  (when (not= eof first-form)
+                    (let [expression-form (and expression? first-form)]
+                      (if (repl-special? expression-form)
+                        (process-repl-special expression-form opts)
+                        (process-execute-source source-text expression-form opts)))))))))
 
 (defn- ^:export execute
   [source expression? print-nil-expression? set-ns theme-id session-id]
-  (clear-fns!)
   (reset-show-indicator!)
   (when set-ns
     (reset! current-ns (symbol set-ns)))
@@ -1942,7 +2179,15 @@
 
 (defn- ns-resolve
   [ns sym]
-  (eval `(~'var ~sym) ns))
+  (let [result (atom nil)]
+    (binding [ana/*cljs-warnings* (zipmap (keys ana/*cljs-warnings*) (repeat false))]
+      (cljs/eval st `(~'var ~sym)
+        {:ns      ns
+         :context :expr}
+        (fn [{:keys [value error]}]
+          (when-not error
+            (reset! result value)))))
+    @result))
 
 (defn- resolve
   [sym]
@@ -1969,11 +2214,28 @@
      (eval `(def ~name) (ns-name the-ns))))
   ([ns name val]
    (when-let [the-ns (find-ns (cond-> ns (instance? Namespace ns) ns-name))]
-     (eval `(def ~name ~val) (ns-name the-ns)))))
+     (eval `(def ~name (quote ~val)) (ns-name the-ns)))))
 
-(defn- inject-planck-eval
-  [target-ns]
-  (intern target-ns 'eval eval))
+(defn- ns-aliases
+  [ns]
+  (if-some [the-ns (find-ns (cond-> ns (instance? Namespace ns) ns-name))]
+    (->> (get-in @st [::ana/namespaces (ns-name the-ns) :requires])
+      (keep (fn [[k v]]
+              (when (not= k v)
+                [k (find-ns v)])))
+      (into {}))
+    (throw (ex-info (str "No namespace " ns " found.") {}))))
+
+(defn- ns-refers
+  [ns]
+  (if-some [the-ns (find-ns (cond-> ns (instance? Namespace ns) ns-name))]
+    (merge
+      (apply dissoc (ns-publics 'cljs.core)
+        (get-in @st [::ana/namespaces (ns-name the-ns) :excludes]))
+      (->> (get-in @st [::ana/namespaces (ns-name the-ns) :uses])
+        (map (fn [[k v]] [k (ns-resolve v k)]))
+        (into {})))
+    (throw (ex-info (str "No namespace " ns " found.") {}))))
 
 (defn- ^:export wrap-color-err
   []
@@ -1983,3 +2245,42 @@
         (orig-print-err-fn (:err-font theme))
         (orig-print-err-fn msg)
         (orig-print-err-fn (:reset-font theme))))))
+
+(defn- ^:export init-data-readers []
+  (binding [cljs/*eval-fn* (fn [{:keys [source]}]
+                             (js-eval source nil))]
+    (set! *data-readers* (get-data-readers))))
+
+(defn- ^:export maybe-load-user-file []
+  (let [try-load (fn [name]
+                   (when-let [[_ _ path origin] (js/PLANCK_LOAD name)]
+                     (when (= "src" origin)
+                       (process-load-file path {:expression? false})
+                       true)))]
+    (or (try-load "user.cljs")
+        (try-load "user.cljc"))))
+
+(defn- load-string
+  [s]
+  (let [result (volatile! nil)]
+    (loop [source s]
+      (if-let [balance-text (and (seq source)
+                                 (is-readable? source))]
+        (do
+          (cljs/eval-str
+            st
+            (subs source 0 (- (count source) (count balance-text)))
+            "string"
+            (merge
+              (select-keys @app-env [:verbose :checked-arrays :static-fns :fn-invoke-direct])
+              {:ns            @current-ns
+               :context       :expr
+               :eval          cljs/js-eval
+               :def-emits-var (-> @app-env :opts (:def-emits-var true))})
+            (fn [{:keys [value error ns]}]
+              (when error
+                (throw error))
+              (reset! current-ns ns)
+              (vreset! result value)))
+          (recur balance-text))
+        @result))))

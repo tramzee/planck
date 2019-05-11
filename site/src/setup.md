@@ -9,7 +9,7 @@ Planck requires no external dependencies. (There is no need for either the Java 
 
 #### Install
 
-The easiest way to install Planck on macOS is via [Homebrew](http://brew.sh):
+The easiest way to install Planck on macOS is via [Homebrew](https://brew.sh):
 
 ```sh
 brew install planck
@@ -36,7 +36,7 @@ brew install --HEAD planck
 
 #### Building
 
-To build Planck on Linux or macOS, get a copy of the source tree, install the [needed dependencies](https://github.com/mfikes/planck/wiki/Building) and run
+To build Planck on Linux or macOS, get a copy of the source tree, install the [needed dependencies](https://github.com/planck-repl/planck/wiki/Building) and run
 
 ```sh
 script/build
@@ -44,6 +44,12 @@ script/build
 
 This results in a binary being placed in `planck-c/build`.
 
+You can then optionally install Planck, the `plk` script, and associated man pages via
+
+```sh
+script/install
+```
+
 ### Bug Reporting
 
-If you happen to encounter any issues with Planck, issues are tracked on GitHub at [https://github.com/mfikes/planck/issues](https://github.com/mfikes/planck/issues).
+If you happen to encounter any issues with Planck, issues are tracked on GitHub at [https://github.com/planck-repl/planck/issues](https://github.com/planck-repl/planck/issues).

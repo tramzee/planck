@@ -1,6 +1,6 @@
 (ns planck.core
   "Core Planck functions for use in scripts."
-  (:refer-clojure :exclude [*command-line-args* resolve])
+  (:refer-clojure :exclude [*command-line-args* resolve eval])
   (:require-macros
    [planck.core :refer [with-open]])
   (:require
@@ -24,15 +24,14 @@
 #_(s/fdef planck.core$macros/with-open
     :args (s/cat :bindings ::bindings :body (s/* any?)))
 
-(def *planck-version*
+(def ^:dynamic *planck-version*
   "A string containing the version of the Planck executable."
   js/PLANCK_VERSION)
 
 (defn exit
   "Causes Planck to terminate with the supplied exit-value."
   [exit-value]
-  (js/PLANCK_SET_EXIT_VALUE exit-value)
-  (throw (js/Error. "PLANCK_EXIT")))
+  (js/PLANCK_EXIT_WITH_VALUE exit-value))
 
 (s/fdef exit
   :args (s/cat :exit-value integer?))
@@ -55,76 +54,62 @@
   also satisfy IBufferedReader."
   (-unread [this s] "Pushes a string of characters back on to the stream."))
 
-(defn- fission!
-  "Breaks an atom's value into two parts. The supplied function should
-  return a pair. The first element will be set to be the atom's new
-  value and the second element will be returned."
-  [atom f & args]
-  (loop []
-    (let [old @atom
-          [new-in new-out] (apply f old args)]
-      (if (compare-and-set! atom old new-in)
-        new-out
-        (recur)))))
+(deftype ^:private Reader [raw-read raw-close buffer pos]
 
-(defn- make-raw-pushback-reader
-  [raw-read raw-close buffer pos]
-  (reify
-    IReader
-    (-read [_]
+  IReader
+  (-read [_]
+    (if-some [buffered @buffer]
+      (do
+        (reset! buffer nil)
+        (subs buffered @pos))
+      (raw-read)))
+
+  IBufferedReader
+  (-read-line [this]
+    (loop []
       (if-some [buffered @buffer]
-        (do
-          (reset! buffer nil)
-          (subs buffered @pos))
-        (raw-read)))
-
-    IBufferedReader
-    (-read-line [this]
-      (loop []
-        (if-some [buffered @buffer]
-          (if-some [n (string/index-of buffered "\n" @pos)]
-            (let [rv (subs buffered @pos n)]
-              (reset! pos (inc n))
-              rv)
-            (if-some [new-chars (raw-read)]
-              (do
-                (reset! buffer (str (subs buffered @pos) new-chars))
-                (reset! pos 0)
-                (recur))
-              (do
-                (reset! buffer nil)
-                (let [rv (subs buffered @pos)]
-                  (if (= rv "")
-                    nil
-                    rv)))))
+        (if-some [n (string/index-of buffered "\n" @pos)]
+          (let [rv (subs buffered @pos n)]
+            (reset! pos (inc n))
+            rv)
           (if-some [new-chars (raw-read)]
             (do
-              (reset! buffer new-chars)
+              (reset! buffer (str (subs buffered @pos) new-chars))
               (reset! pos 0)
               (recur))
-            nil))))
+            (do
+              (reset! buffer nil)
+              (let [rv (subs buffered @pos)]
+                (if (= rv "")
+                  nil
+                  rv)))))
+        (if-some [new-chars (raw-read)]
+          (do
+            (reset! buffer new-chars)
+            (reset! pos 0)
+            (recur))
+          nil))))
 
-    IPushbackReader
-    (-unread [_ s]
-      (swap! buffer #(str s %))
-      (reset! pos 0))
+  IPushbackReader
+  (-unread [_ s]
+    (swap! buffer #(str s %))
+    (reset! pos 0))
 
-    IClosable
-    (-close [_]
-      (raw-close))))
+  IClosable
+  (-close [_]
+    (raw-close)))
 
-(defn- make-raw-writer
-  [raw-write raw-flush raw-close]
-  (reify
-    IWriter
-    (-write [_ s]
-      (raw-write s))
-    (-flush [_]
-      (raw-flush))
 
-    IClosable
-    (-close [_]
-      (raw-close))))
+(deftype ^:private Writer [raw-write raw-flush raw-close]
+  IWriter
+  (-write [_ s]
+    (raw-write s))
+  (-flush [_]
+    (raw-flush))
+
+  IClosable
+  (-close [_]
+    (raw-close)))
 
 (defprotocol IInputStream
   "Protocol for reading binary data."
@@ -135,36 +120,33 @@
   (-write-bytes [this byte-array] "Writes byte array.")
   (-flush-bytes [this] "Flushes output."))
 
-(defn- make-raw-input-stream
-  [raw-read-bytes raw-close]
-  (reify
-    IInputStream
-    (-read-bytes [_]
-      (raw-read-bytes))
+(deftype ^:private InputStream [raw-read-bytes raw-close]
 
-    IClosable
-    (-close [_]
-      (raw-close))))
+  IInputStream
+  (-read-bytes [_]
+    (raw-read-bytes))
 
-(defn- make-raw-output-stream
-  [raw-write-bytes raw-flush-bytes raw-close]
-  (reify
-    IOutputStream
-    (-write-bytes [_ byte-array]
-      (raw-write-bytes byte-array))
-    (-flush-bytes [_]
-      (raw-flush-bytes))
+  IClosable
+  (-close [_]
+    (raw-close)))
 
-    IClosable
-    (-close [_]
-      (raw-close))))
+(deftype ^:private OutputStream [raw-write-bytes raw-flush-bytes raw-close]
+  IOutputStream
+  (-write-bytes [_ byte-array]
+    (raw-write-bytes byte-array))
+  (-flush-bytes [_]
+    (raw-flush-bytes))
+
+  IClosable
+  (-close [_]
+    (raw-close)))
 
 (defonce
   ^{:doc     "An IPushbackReader representing standard input for read operations."
     :dynamic true}
   *in*
   (let [closed (atom false)]
-    (make-raw-pushback-reader
+    (->Reader
       (fn []
         (when-not @closed
           (js/PLANCK_RAW_READ_STDIN)))
@@ -175,7 +157,7 @@
 (defn- make-closeable-raw-writer
   [raw-write raw-flush]
   (let [closed (atom false)]
-    (make-raw-writer
+    (->Writer
       (fn [s]
         (when-not @closed
           (raw-write s)))
@@ -194,7 +176,8 @@
 
 (defonce
   ^{:doc "A sequence of the supplied command line arguments, or nil if
-  none were supplied"}
+  none were supplied"
+    :dynamic true}
   *command-line-args*
   (-> js/PLANCK_INITIAL_COMMAND_LINE_ARGS js->clj seq))
 
@@ -252,7 +235,7 @@
 (defn- make-string-reader
   [s]
   (let [content (volatile! s)]
-    (make-raw-pushback-reader
+    (->Reader
       (fn [] (let [return @content]
                (vreset! content nil)
                return))
@@ -311,7 +294,7 @@
   (tree-seq
     (fn [f] (js/PLANCK_IS_DIRECTORY (:path f)))
     (fn [d] (map *as-file-fn*
-              (js->clj (js/PLANCK_LIST_FILES (:path d)))))
+              (js/PLANCK_LIST_FILES (:path d))))
     (*as-file-fn* dir)))
 
 (defn- file?
@@ -372,7 +355,7 @@
 (defn eval
   "Evaluates the form data structure (not text!) and returns the result."
   [form]
-  (repl/eval form))
+  (cljs.core/eval form))
 
 (s/fdef eval
   :args (s/cat :form any?)
@@ -382,7 +365,7 @@
   "Returns the var to which a symbol will be resolved in the namespace, else
   nil."
   [ns sym]
-  (repl/ns-resolve ns sym))
+  (#'repl/ns-resolve ns sym))
 
 (s/fdef ns-resolve
   :args (s/cat :ns symbol? :sym symbol?)
@@ -392,10 +375,35 @@
   "Returns the var to which a symbol will be resolved in the current
   namespace, else nil."
   [sym]
-  (repl/resolve sym))
+  (#'repl/resolve sym))
 
 (s/fdef resolve
   :args (s/cat :sym symbol?)
+  :ret (s/nilable var?))
+
+(defn requiring-resolve
+  "Resolves namespace-qualified sym per 'resolve'. If initial resolve
+  fails, attempts to require sym's namespace and retries."
+  [sym]
+  (if (qualified-symbol? sym)
+    (or (resolve sym)
+        (do (eval `(require '~(-> sym namespace symbol)))
+            (resolve sym)))
+    (throw (js/Error. (str "Not a qualified symbol: " sym)))))
+
+(s/fdef requiring-resolve
+  :args (s/cat :sym qualified-symbol?)
+  :ret (s/nilable var?))
+
+(defn find-var
+  "Returns the global var named by the namespace-qualified symbol, or
+  nil if no var with that name."
+  [sym]
+  (when (eval `(exists? ~sym))
+    (eval `(var ~sym))))
+
+(s/fdef find-var
+  :args (s/cat :sym qualified-symbol?)
   :ret (s/nilable var?))
 
 (defn intern
@@ -404,20 +412,38 @@
   The namespace must exist. The var will adopt any metadata from the name
   symbol. Returns the var."
   ([ns name]
-   (repl/intern ns name))
+   (#'repl/intern ns name))
   ([ns name val]
-   (repl/intern ns name val)))
+   (#'repl/intern ns name val)))
 
 (s/fdef intern
   :args (s/cat :ns (s/or :sym symbol? :ns #(instance? Namespace %))
           :name symbol?
           :val (s/? any?)))
 
+(defn ns-aliases
+  "Returns a map of the aliases for the namespace."
+  [ns]
+  (#'repl/ns-aliases ns))
+
+(s/fdef ns-aliases
+  :args (s/cat :ns (s/or :sym symbol? :ns #(instance? Namespace %)))
+  :ret (s/map-of simple-symbol? #(instance? Namespace %)))
+
+(defn ns-refers
+  "Returns a map of the refer mappings for the namespace."
+  [ns]
+  (#'repl/ns-refers ns))
+
+(s/fdef ns-refers
+  :args (s/cat :ns (s/or :sym symbol? :ns #(instance? Namespace %)))
+  :ret (s/map-of simple-symbol? var?))
+
 (defn- transfer-ns
   [state ns]
   (-> state
     (assoc-in [:cljs.analyzer/namespaces ns]
-      (get-in @repl/st [:cljs.analyzer/namespaces ns]))))
+      (get-in @@#'repl/st [:cljs.analyzer/namespaces ns]))))
 
 (defn init-empty-state
   "An init function for use with cljs.js/empty-state which initializes the
@@ -447,7 +473,29 @@
   :args (s/alt :unary (s/cat :millis #(and (integer? %) (not (neg? %))))
                :binary (s/cat :millis #(and (integer? %) (not (neg? %))) :nanos #(and (integer? %) (<= 0 % 999999)))))
 
+(declare load-string)
+
+(defn load-reader
+  "Sequentially read and evaluate the set of forms contained in the
+  stream/file"
+  [rdr]
+  (load-string (slurp rdr)))
+
+(s/fdef load-reader
+  :args (s/cat :rdr #(satisfies? IPushbackReader %))
+  :ret any?)
+
+(defn load-string
+  "Sequentially read and evaluate the set of forms contained in the
+  string"
+  [s]
+  (#'repl/load-string s))
+
+(s/fdef load-string
+  :args (s/cat :s string?)
+  :ret any?)
+
 ;; Ensure planck.io and planck.http are loaded so that their
 ;; facilities are available
-(repl/side-load-ns 'planck.http)
-(repl/side-load-ns 'planck.io)
+(#'repl/side-load-ns 'planck.http)
+(#'repl/side-load-ns 'planck.io)

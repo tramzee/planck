@@ -1,18 +1,11 @@
 ## REPL
 
 <img width="130" align="right" style="margin: 0ex 1em" src="img/repl.jpg">
-If you don't provide any `-i` or `-e` options or args to `planck` when launching it (or if you explicitly specify `-r` or `-​-​repl` as the _main-opt_), Planck will enter an interactive Read-Eval-Print Loop, or _REPL_.
+If you don't provide any `-i` or `-e` options or args to `plk` when launching it (or if you explicitly specify `-r` or `-​-​repl` as the _main-opt_), Planck will enter an interactive Read-Eval-Print Loop, or _REPL_.
 
 ```
-$ planck
-Planck 2.11.0
-ClojureScript 1.9.946
-    Docs: (doc function-name-here)
-          (find-doc "part-of-name-here")
-  Source: (source function-name-here)
-    Exit: Control+D or :cljs/quit or exit or quit
- Results: Stored in vars *1, *2, *3, an exception in *e
-
+$ plk
+ClojureScript 1.10.520
 cljs.user=> ▊
 ```
 
@@ -119,7 +112,7 @@ Planck attempts to automatically detect if you are running in a light or dark te
 ###  Dumb Terminal
 Normally, Planck employs the use of VT100 and ANSI codes to perform brace matching, line editing features, and to add color. If you are using Planck in an environment where these codes are not supported, or you would prefer to disable them, you can pass `-d` or `-​-dumb-terminal` when starting Planck.
 
-> If you'd prefer to use Planck with the line-editing capabilities offered by [GNU Readline](http://cnswww.cns.cwru.edu/php/chet/readline/rltop.html), you can use [`rlwrap`](https://github.com/hanslub42/rlwrap), (which is also installable via `brew`). When using `rlwrap`, it is necessary to pass `-d` to `planck` so that `rlwrap`'s terminal controls become active: `rlwrap planck -d`.
+> If you'd prefer to use Planck with the line-editing capabilities offered by [GNU Readline](https://tiswww.case.edu/php/chet/readline/rltop.html), you can use [`rlwrap`](https://github.com/hanslub42/rlwrap), (which is also installable via `brew`). When using `rlwrap`, it is necessary to pass `-d` to `planck` so that `rlwrap`'s terminal controls become active: `rlwrap planck -d`.
 
 ###  Exit
 You can exit the REPL by typeing Ctrl-D, `exit`, `quit`, or `:cljs/quit`.
@@ -170,3 +163,20 @@ If you switch to another namespace and find that `doc` no longer works, this is 
 ```
 
 The same works for `source`, `pst`, `apropos`, `find-doc`, and `dir`.
+
+#### `:repl-requires`
+
+If you would like a different set of symbols referred into `cljs.user` upon startup, Planck supports [`:repl-requires`](https://clojurescript.org/reference/repl-options#repl-requires). For example, if you put the following into a `compile-opts.edn` file
+
+```clojure
+{:repl-requires [[planck.repl :refer-macros [apropos dir find-doc doc source pst]]
+                 [cljs.pprint :refer [pprint pp]]]}
+```
+
+then you can launch Planck via
+
+```
+plk --compile-opts compile-opts.edn -r
+```
+
+and then `pprint` and `pp` will be available.

@@ -53,26 +53,31 @@ void empty_previous_lines(repl_t *repl) {
     repl->previous_lines = NULL;
 }
 
-char *form_prompt(repl_t *repl, bool is_secondary) {
+#define SEC_PROMPT "#_=> "
 
+char *form_prompt(repl_t *repl, bool is_secondary) {
     char *prompt = NULL;
+    size_t prompt_min_len = 6; // length of SEC_PROMPT literal
+    size_t prefix_min_len = 2; // length of "#_" prefix
 
     char *current_ns = repl->current_ns;
     bool dumb_terminal = repl->session_id != 0 || config.dumb_terminal;
 
     if (!is_secondary) {
-        if (strlen(current_ns) == 1 && !config.dumb_terminal) {
-            prompt = malloc(6 * sizeof(char));
+        if (strlen(current_ns) < prefix_min_len && !config.dumb_terminal) {
+            prompt = malloc(prompt_min_len * sizeof(char));
             sprintf(prompt, " %s=> ", current_ns);
         } else {
             prompt = str_concat(current_ns, "=> ");
         }
     } else {
         if (!dumb_terminal) {
-            size_t len = strlen(current_ns) - 2;
-            prompt = malloc((len + 6) * sizeof(char));
-            memset(prompt, ' ', len);
-            sprintf(prompt + len, "#_=> ");
+            size_t ns_len = strlen(current_ns);
+            size_t ns_len_extra = (ns_len < prefix_min_len) ?
+                                      0 : ns_len - prefix_min_len;
+            prompt = malloc((prompt_min_len + ns_len_extra) * sizeof(char));
+            memset(prompt, ' ', ns_len_extra);
+            sprintf(prompt + ns_len_extra, SEC_PROMPT);
         }
     }
 
@@ -140,7 +145,7 @@ bool process_line(repl_t *repl, char *input_line, bool split_on_newlines) {
 
     if (is_exit_command(repl->input, repl->session_id != 0)) {
         if (repl->session_id == 0) {
-            exit_value = EXIT_SUCCESS_INTERNAL;
+            exit(0);
         }
         return true;
     }
@@ -251,6 +256,22 @@ void run_cmdline_loop(repl_t *repl) {
 
     while (true) {
 
+        /* Gross hack to avoid a race condition. If
+         * evaluating (js/setTimeout #(prn 1) 0)
+         * sometimes the (prn 1) side effect does not
+         * appear. Sleeping a millisecond here
+         * appears to successfully work around
+         * whatever is causing it.
+         */
+        struct timespec t;
+        t.tv_sec = 0;
+        t.tv_nsec = 1000 * 1000;
+        int err;
+        while ((err = nanosleep(&t, &t)) && errno == EINTR) {}
+        if (err) {
+            engine_perror("repl nanosleep");
+        }
+
         if (config.dumb_terminal) {
             display_prompt(repl->current_prompt);
             free(input_line);
@@ -301,7 +322,7 @@ void run_cmdline_loop(repl_t *repl) {
                     pthread_mutex_unlock(&repl_print_mutex);
                     continue;
                 } else { // Ctrl-D
-                    exit_value = EXIT_SUCCESS_INTERNAL;
+                    exit_value = 0;
                     pthread_mutex_unlock(&repl_print_mutex);
                     break;
                 }
@@ -313,10 +334,14 @@ void run_cmdline_loop(repl_t *repl) {
 
         // If the input is small process each line separately here
         // so that things like brace highlighting work properly.
-        // But for large input, let process line more efficiently
-        // handle the input.
+        // But for large input, let process_line() more efficiently
+        // handle the input. The initial case is for a new line (the
+        // new itself is not part of input_line).
         bool break_out = false;
-        if (strlen(input_line) < 16384) {
+        if (repl->input != NULL & strlen(input_line) == 0) {
+            repl->indent_space_count = 0;
+            break_out = process_line(repl, input_line, false);
+        } else if (strlen(input_line) < 16384) {
             char *tokenize = strdup(input_line);
             char *saveptr;
             char *token = strtok_r(tokenize, "\n", &saveptr);

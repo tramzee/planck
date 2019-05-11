@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [ "${VERBOSE_BUILD:-0}" == "1" ]; then
+  set -x
+fi
+
 if [ -z "$BUILD_PPA" ]; then
     rm -f jscomp.js
 fi
@@ -8,4 +12,5 @@ rm -rf target
 rm -rf resources
 rm -rf tools.reader
 rm -rf clojurescript
+rm -rf .cpcache
 script/clean-bundle

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 
+if [ "${VERBOSE_BUILD:-0}" == "1" ]; then
+  set -x
+fi
+
 if [ ! -f jscomp.js ]; then
-  curl -s -O http://planck-repl.org/releases/closure-${CLOSURE_JS_RELEASE}/jscomp.js
+  curl -s -O https://planck-repl.org/releases/closure-${CLOSURE_JS_RELEASE}/jscomp.js
 fi
 
 # Make sure we fail and exit on the command that actually failed.
@@ -9,6 +13,8 @@ set -e
 set -o pipefail
 
 mkdir -p out/cljs/analyzer
+mkdir -p out/cljs/compiler
+mkdir -p out/cljs/env
 mkdir -p out/cljs/core/specs
 
 export PATH=script:$PATH
@@ -17,4 +23,11 @@ if [ -n "${CANARY_CLOJURESCRIPT_VERSION+set}" ]; then
   DEPS="{:deps {org.clojure/clojurescript {:mvn/version \"$CANARY_CLOJURESCRIPT_VERSION\"}}}"
 fi
 
-clojure -Sdeps "${DEPS:-{}}" script/build.clj
+if [ -n "${RESOLVE_ALIAS+set}" ]; then
+  clojure -R"${RESOLVE_ALIAS}" -Sdeps "${DEPS:-{}}" script/build.clj
+else
+  if [ "${VERBOSE_BUILD:-0}" == "1" ]; then
+    clojure -Sdeps "${DEPS:-{}}" -Spath
+  fi
+  clojure -Sdeps "${DEPS:-{}}" script/build.clj
+fi

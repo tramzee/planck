@@ -9,6 +9,8 @@
 
 (def canary-build? (boolean (System/getenv "CANARY_BUILD")))
 
+(def sandbox-build? (boolean (System/getenv "SANDBOX_BUILD")))
+
 (def ci-build? (or canary-build?
                    (boolean (System/getenv "TRAVIS_OS_NAME"))))
 
@@ -17,7 +19,9 @@
                       (System/getenv "CLJS_CHECKED_ARRAYS") (keyword (System/getenv "CLJS_CHECKED_ARRAYS"))
                       :else false))
 
-(def non-fatal-warnings #{:redef})
+(def experimental-warnings #{:recur-type-mismatch :private-var-access})
+
+(def non-fatal-warnings (into #{:redef} experimental-warnings))
 
 (defn delete-recursively [fname]
   (doseq [f (reverse (file-seq (io/file fname)))]
@@ -39,10 +43,13 @@
      :optimize-constants false
      :dump-core          false
      :checked-arrays     checked-arrays
-     :parallel-build     false
-     :foreign-libs       [{:file "jscomp.js"
+     :parallel-build     true
+     :libs               ["lib/closure"
+                          "lib/third_party/closure"]
+     :foreign-libs       [{:file     "jscomp.js"
                            :provides ["google-closure-compiler-js"]}]
-     :compiler-stats     false}))
+     :compiler-stats     false
+     :aot-cache          (not sandbox-build?)}))
 
 (defn copy-source
   [filename]
@@ -50,11 +57,15 @@
     (slurp (io/resource filename))))
 
 (copy-source "cljs/test.cljc")
+(copy-source "cljs/pprint.cljc")
 (copy-source "cljs/spec/alpha.cljc")
 (copy-source "cljs/spec/test/alpha.cljc")
 (copy-source "cljs/spec/test/alpha.cljs")
 (copy-source "cljs/spec/gen/alpha.cljc")
 (copy-source "cljs/analyzer/api.cljc")
+(copy-source "cljs/analyzer/macros.clj")
+(copy-source "cljs/compiler/macros.clj")
+(copy-source "cljs/env/macros.clj")
 (copy-source "clojure/template.clj")
 
 (try

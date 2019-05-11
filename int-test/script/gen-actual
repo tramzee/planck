@@ -19,6 +19,12 @@ export PLANCK="$PLANCK_BINARY --quiet --theme=plain"
 echo "Repeated ordered -e and -i, supressing nil"
 $PLANCK -i $SRC/no-ns/foo.cljs -e ':a' -e 'nil' -i $SRC/no-ns/bar.cljs -e 2 -i $SRC/no-ns/foo.cljs
 
+echo "Repeated ordered -e and -i, supressing nil, classpath resources @"
+$PLANCK -c $SRC -i @no-ns/foo.cljs -e ':a' -e 'nil' -i @no-ns/bar.cljs -e 2 -i @no-ns/foo.cljs
+
+echo "Repeated ordered -e and -i, supressing nil, classpath resources @/"
+$PLANCK -c $SRC -i @/no-ns/foo.cljs -e ':a' -e 'nil' -i @/no-ns/bar.cljs -e 2 -i @/no-ns/foo.cljs
+
 echo "Test :cljs/quit"
 $PLANCK <<REPL_INPUT
 1
@@ -41,7 +47,7 @@ exit
 REPL_INPUT
 
 echo "Exit on first error"
-$PLANCK -e"(require 'planck.repl)" -e'(set! planck.repl/*planck-integration-tests* true)' -e'(println "ok")' -e'(throw (js/Error. "x"))' -e'(println "unreachable")'
+$PLANCK -e"(require 'planck.repl)" -e'(set! ^:private-var-access-nowarn planck.repl/*planck-integration-tests* true)' -e'(println "ok")' -e'(throw (js/Error. "x"))' -e'(println "unreachable")'
 
 echo "Multi-line data"
 $PLANCK <<REPL_INPUT
@@ -125,17 +131,23 @@ echo "Test run file with exit"
 $PLANCK $SRC/test_exit/exit_in_file.cljs
 echo $?
 
+echo "Test run file directly"
+$PLANCK $SRC/run_file/core.cljs
+
+echo "Test run file classpath resource @"
+$PLANCK -c $SRC @run_file/core.cljs
+
+echo "Test run file classpath without @"
+$PLANCK -c $SRC run_file/core.cljs
+
+echo "Test run file classpath resource @/"
+$PLANCK -c $SRC @/run_file/core.cljs
+
 echo "Test run malformed expression"
 $PLANCK -e ']'
 
 echo "Test run malformed script"
 $PLANCK $SRC/malformed/core.cljs
-
-echo "Test run expression with analysis error"
-$PLANCK -e '(defn)'
-
-echo "Test run script with analysis error"
-$PLANCK $SRC/analysis/core.cljs
 
 echo "Test in-ns"
 $PLANCK <<REPL_INPUT
@@ -170,11 +182,11 @@ echo $?
 echo "Test require :reload in changing spec"
 mkdir -p /tmp/PLANCK_SRC/foo
 $PLANCK -c /tmp/PLANCK_SRC <<REPL_INPUT
-(require 'planck.io)
-(planck.io/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :initial)")
+(require 'planck.core)
+(planck.core/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :initial)")
 (require '[foo.bar :as baz])
 baz/x
-(planck.io/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :reloaded)")
+(planck.core/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :reloaded)")
 (require '[foo.bar :as quux] :reload)
 quux/x
 REPL_INPUT
@@ -183,11 +195,11 @@ rm -rf /tmp/PLANCK_SRC/foo
 echo "Test require :reload-all"
 mkdir -p /tmp/PLANCK_SRC/foo
 $PLANCK -c /tmp/PLANCK_SRC <<REPL_INPUT
-(require 'planck.io)
-(planck.io/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :initial)")
+(require 'planck.core)
+(planck.core/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :initial)")
 (require 'foo.bar)
 foo.bar/x
-(planck.io/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :reloaded)")
+(planck.core/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :reloaded)")
 (require 'foo.bar :reload-all)
 foo.bar/x
 REPL_INPUT
@@ -197,13 +209,13 @@ echo "Test require :reload with cache"
 mkdir -p /tmp/PLANCK_SRC/foo
 mkdir -p /tmp/PLANCK_CACHE
 $PLANCK -k /tmp/PLANCK_CACHE -c /tmp/PLANCK_SRC <<REPL_INPUT
-(require 'planck.io)
-(planck.io/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :initial)")
+(require 'planck.core)
+(planck.core/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :initial)")
 (require 'foo.bar)
 foo.bar/x
 (require 'foo.bar :reload)
 foo.bar/x
-(planck.io/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :reloaded)")
+(planck.core/spit "/tmp/PLANCK_SRC/foo/bar.cljs" "(ns foo.bar)\n(def x :reloaded)")
 (require 'foo.bar :reload)
 foo.bar/x
 REPL_INPUT
@@ -214,6 +226,18 @@ rm -rf /tmp/PLANCK_SRC/foo
 echo "Test require-macros unknown ns"
 $PLANCK -c $SRC <<REPL_INPUT
 (require-macros 'unknown-ns.core)
+REPL_INPUT
+
+echo "Test spec cache"
+$PLANCK -Kc $SRC <<REPL_INPUT
+(require 'test-cache-spec.foo)
+(test-cache-spec.foo/valid? 3)
+(test-cache-spec.foo/valid? "a")
+REPL_INPUT
+$PLANCK -Kc $SRC <<REPL_INPUT
+(require 'test-cache-spec.foo)
+(test-cache-spec.foo/valid? 3)
+(test-cache-spec.foo/valid? "a")
 REPL_INPUT
 
 echo "Test require-macros REPL special"
@@ -262,8 +286,6 @@ $PLANCK -c $SRC <<REPL_INPUT
 (source inc)
 (source when)
 (source ns-resolve)
-(source doc)
-(source planck.repl/doc)
 (require '[test-doc-source.core :as tds])
 (source test-doc-source.core/my-function)
 (source tds/my-function)
@@ -274,7 +296,7 @@ REPL_INPUT
 echo "Test pst special"
 $PLANCK <<REPL_INPUT
 (require 'planck.repl)
-(set! planck.repl/*planck-integration-tests* true)
+(set! ^:private-var-access-nowarn planck.repl/*planck-integration-tests* true)
 (defn f [] (throw (js/Error. "whoah")))
 (defn g [] (throw (js/Error. "ouch")))
 (f)
@@ -294,22 +316,15 @@ load-me.core/a
 load-me.core/b
 REPL_INPUT
 
-echo "Test load-file from classpath"
+echo "Test load-file from classpath - expect this to fail"
 $PLANCK -c $SRC <<REPL_INPUT
 (load-file "test_load_file/core.cljs")
-test-load-file.core/success
 REPL_INPUT
 
 echo "Test load REPL special"
 $PLANCK -c $SRC <<REPL_INPUT
 (in-ns 'test-load-file.other)
 (load "core")
-test-load-file.core/success
-REPL_INPUT
-
-echo "Test load-file from classpath env var"
-PLANCK_CLASSPATH=$SRC $PLANCK <<REPL_INPUT
-(load-file "test_load_file/core.cljs")
 test-load-file.core/success
 REPL_INPUT
 
@@ -624,12 +639,6 @@ $PLANCK << REPL_INPUT
 (require '[clojure.set])
 REPL_INPUT
 
-echo "Test reader and analysis diagnostics"
-$PLANCK << REPL_INPUT
-(require '[foo.bar :quu])
-)
-REPL_INPUT
-
 echo "Test eval"
 $PLANCK << REPL_INPUT
 (require '[planck.core :refer [eval]])
@@ -702,6 +711,18 @@ $PLANCK - << SCRIPT_INPUT
 (wait-more)
 SCRIPT_INPUT
 
+echo "Test clear timeout lets script stop"
+$PLANCK - << SCRIPT_INPUT
+(def t (js/setTimeout #(prn :hello) 1000000))
+(js/setTimeout #(do (prn :done) (js/clearTimeout t)) 100)
+SCRIPT_INPUT
+
+echo "Test clear interval lets script stop"
+$PLANCK - << SCRIPT_INPUT
+(def t (js/setInterval #(prn :tick) 1000))
+(js/setTimeout #(do (prn :done) (js/clearInterval t)) 2500)
+SCRIPT_INPUT
+
 echo "Disable asserts"
 $PLANCK -a << REPL_INPUT
 (assert false)
@@ -768,3 +789,41 @@ $PLANCK <<REPL_INPUT
 js/source
 js/a
 REPL_INPUT
+
+echo "Auto-load user.cljs"
+echo "(def x 3)" > /tmp/PLANCK_SRC/user.cljs
+$PLANCK -c /tmp/PLANCK_SRC <<REPL_INPUT
+x
+REPL_INPUT
+
+faketty () {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        script -qt 0 /dev/null $@
+    else
+        script -qfec "$(printf "%q " "$@")" /dev/null
+    fi
+}
+echo "stdio TTY is detected (in a faketty)"
+faketty $PLANCK -i $SRC/test_tty/stdio.cljs
+echo
+
+echo "stdin non-TTY is detected (in a pipeline)"
+echo "" | $PLANCK -i $SRC/test_tty/stdin.cljs
+echo
+
+echo "stdout non-TTY is detected (in a pipeline)"
+$PLANCK -i $SRC/test_tty/stdout.cljs | cat
+echo
+
+echo "stderr non-TTY is detected (redirected to /dev/null)"
+$PLANCK -i $SRC/test_tty/stderr.cljs 2>/dev/null
+echo
+
+echo "*err* TTY is detected when rebound to *out* even when stderr is redirected to /dev/null"
+cat <<EOF >/tmp/PLANCK_TTY_REBINDING_TEST
+#!/bin/sh
+$PLANCK -i $SRC/test_tty/rebinding_err_out.cljs 2>/dev/null
+EOF
+chmod +x /tmp/PLANCK_TTY_REBINDING_TEST
+faketty /tmp/PLANCK_TTY_REBINDING_TEST
+echo

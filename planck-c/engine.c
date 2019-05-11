@@ -157,6 +157,9 @@ JSValueRef get_value(JSContextRef ctx, char *namespace, char *name) {
     while (ns_part != NULL) {
         char *munged_ns_part = munge(ns_part);
         if (ns_val) {
+            if (JSValueIsUndefined(ctx, ns_val)) {
+                return ns_val;
+            }
             ns_val = get_value_on_object(ctx, JSValueToObject(ctx, ns_val, NULL), munged_ns_part);
         } else {
             ns_val = get_value_on_object(ctx, JSContextGetGlobalObject(ctx), munged_ns_part);
@@ -276,7 +279,10 @@ void bootstrap(char *out_path) {
     evaluate_script(ctx, "goog.isProvided_ = function(x) { return false; };", source);
 
     evaluate_script(ctx,
-                    "goog.require = function (name) { return CLOSURE_IMPORT_SCRIPT(goog.dependencies_.nameToPath[name]); };",
+                    "goog.require = function (name) {\n"
+                    "  return CLOSURE_IMPORT_SCRIPT(goog.debugLoader_ ? \n"
+                    "                                goog.debugLoader_.getPathFromDeps_(name) :\n"
+                    "                                goog.dependencies_.nameToPath[name]); };",
                     source);
 
     evaluate_script(ctx, "goog.require('cljs.core');", source);
@@ -291,7 +297,9 @@ void bootstrap(char *out_path) {
                             "            AMBLY_TMP = cljs.core._STAR_loaded_libs_STAR_;\n"
                             "        }\n"
                             "        cljs.core._STAR_loaded_libs_STAR_ = cljs.core.into.call(null, AMBLY_TMP, [name]);\n"
-                            "        CLOSURE_IMPORT_SCRIPT(goog.dependencies_.nameToPath[name]);\n"
+                            "        CLOSURE_IMPORT_SCRIPT(goog.debugLoader_ ? \n"
+                            "                               goog.debugLoader_.getPathFromDeps_(name) :\n"
+                            "                               goog.dependencies_.nameToPath[name]);\n"
                             "    }\n"
                             "};", source);
 }
@@ -397,6 +405,20 @@ void discarding_sender(const char *msg) {
     /* Intentionally empty. */
 }
 
+void maybe_load_user_file() {
+    if (config.repl) {
+        JSValueRef arguments[0];
+        JSValueRef ex = NULL;
+        JSObjectCallAsFunction(ctx, get_function("planck.repl", "maybe-load-user-file"), JSContextGetGlobalObject(ctx),
+                               0, arguments, &ex);
+        debug_print_value("planck.repl/maybe-load-user-file", ctx, ex);
+
+        if (ex) {
+            print_value("Error loading user file: ", ctx, ex);
+        }
+    }
+}
+
 void *do_engine_init(void *data) {
     ctx = JSGlobalContextCreate(NULL);
 
@@ -439,6 +461,7 @@ void *do_engine_init(void *data) {
     register_global_function(ctx, "PLANCK_READ_FILE", function_read_file);
     register_global_function(ctx, "PLANCK_LOAD", function_load);
     register_global_function(ctx, "PLANCK_LOAD_DEPS_CLJS_FILES", function_load_deps_cljs_files);
+    register_global_function(ctx, "PLANCK_LOAD_DATA_READERS_FILES", function_load_data_readers_files);
     register_global_function(ctx, "PLANCK_LOAD_FROM_JAR", function_load_from_jar);
     register_global_function(ctx, "PLANCK_CACHE", function_cache);
 
@@ -446,7 +469,7 @@ void *do_engine_init(void *data) {
 
     register_global_function(ctx, "PLANCK_GET_TERM_SIZE", function_get_term_size);
 
-    register_global_function(ctx, "PLANCK_SET_EXIT_VALUE", function_set_exit_value);
+    register_global_function(ctx, "PLANCK_EXIT_WITH_VALUE", function_exit_with_value);
 
     register_global_function(ctx, "PLANCK_SHELL_SH", function_shellexec);
 
@@ -474,7 +497,9 @@ void *do_engine_init(void *data) {
     register_global_function(ctx, "PLANCK_FILE_OUTPUT_STREAM_FLUSH", function_file_output_stream_flush);
     register_global_function(ctx, "PLANCK_FILE_OUTPUT_STREAM_CLOSE", function_file_output_stream_close);
 
+    register_global_function(ctx, "PLANCK_MKDIRS", function_mkdirs);
     register_global_function(ctx, "PLANCK_DELETE", function_delete_file);
+    register_global_function(ctx, "PLANCK_COPY", function_copy_file);
 
     register_global_function(ctx, "PLANCK_LIST_FILES", function_list_files);
 
@@ -494,6 +519,12 @@ void *do_engine_init(void *data) {
     register_global_function(ctx, "PLANCK_SOCKET_CLOSE", function_socket_close);
 
     register_global_function(ctx, "PLANCK_SLEEP", function_sleep);
+
+    register_global_function(ctx, "PLANCK_SIGNAL_TASK_COMPLETE", function_signal_task_complete);
+
+    register_global_function(ctx, "PLANCK_GETENV", function_getenv);
+
+    register_global_function(ctx, "PLANCK_ISATTY", function_isatty);
 
     register_global_function(ctx, "PLANCK_DLOPEN", function_dlopen);
     register_global_function(ctx, "PLANCK_DLSYM", function_dlsym);
@@ -529,25 +560,40 @@ void *do_engine_init(void *data) {
     evaluate_script(ctx,
                     "var PLANCK_TIMEOUT_CALLBACK_STORE = {};\
                      var setTimeout = function( fn, ms ) {\
-                       var id = PLANCK_SET_TIMEOUT(ms);\
-                       PLANCK_TIMEOUT_CALLBACK_STORE[id] = fn;\
-                       return id;\
+                       if ( cljs.core.fn_QMARK_(fn) ) {\
+                         var id = PLANCK_SET_TIMEOUT(ms);\
+                         PLANCK_TIMEOUT_CALLBACK_STORE[id] = fn;\
+                         return id;\
+                       } else {\
+                         throw new Error(\"Callback must be a function\");\
+                       }\
                      };\
                      var PLANCK_RUN_TIMEOUT = function( id ) {\
                        if( PLANCK_TIMEOUT_CALLBACK_STORE[id] ) {\
-                         PLANCK_TIMEOUT_CALLBACK_STORE[id]();\
-                         delete PLANCK_TIMEOUT_CALLBACK_STORE[id];\
+                         try {\
+                           PLANCK_TIMEOUT_CALLBACK_STORE[id]();\
+                         } finally {\
+                           delete PLANCK_TIMEOUT_CALLBACK_STORE[id];\
+                           PLANCK_SIGNAL_TASK_COMPLETE();\
+                         }\
                        }\
                      };\
                      var clearTimeout = function( id ) {\
-                        delete PLANCK_TIMEOUT_CALLBACK_STORE[id];\
+                       if ( PLANCK_TIMEOUT_CALLBACK_STORE[id] ) {\
+                         delete PLANCK_TIMEOUT_CALLBACK_STORE[id];\
+                         PLANCK_SIGNAL_TASK_COMPLETE();\
+                       }\
                      };\
                      var PLANCK_INTERVAL_CALLBACK_STORE = {};\
                      var setInterval = function( fn, ms ) {\
-                        var id = PLANCK_SET_INTERVAL(ms, null);\
-                        PLANCK_INTERVAL_CALLBACK_STORE[id] = \
-                          function(){ fn(); PLANCK_SET_INTERVAL(ms, id); };\
-                        return id;\
+                        if ( cljs.core.fn_QMARK_(fn) ) {\
+                          var id = PLANCK_SET_INTERVAL(ms, null);\
+                          PLANCK_INTERVAL_CALLBACK_STORE[id] = \
+                            function(){ fn(); PLANCK_SET_INTERVAL(ms, id); };\
+                          return id;\
+                        } else {\
+                          throw new Error(\"Callback must be a function\");\
+                        }\
                      };\
                      var PLANCK_RUN_INTERVAL = function( id ) {\
                         if( PLANCK_INTERVAL_CALLBACK_STORE[id] ) {\
@@ -555,7 +601,10 @@ void *do_engine_init(void *data) {
                         }\
                      };\
                      var clearInterval = function( id ) {\
-                        delete PLANCK_INTERVAL_CALLBACK_STORE[id];\
+                       if ( PLANCK_INTERVAL_CALLBACK_STORE[id] ) {\
+                         delete PLANCK_INTERVAL_CALLBACK_STORE[id];\
+                         PLANCK_SIGNAL_TASK_COMPLETE();\
+                       }\
                      };",
                     "<init>");
 
@@ -564,7 +613,7 @@ void *do_engine_init(void *data) {
     set_print_sender(&discarding_sender);
 
     {
-        JSValueRef arguments[8];
+        JSValueRef arguments[9];
         arguments[0] = JSValueMakeBoolean(ctx, config.repl);
         arguments[1] = JSValueMakeBoolean(ctx, config.verbose);
         JSValueRef cache_path_ref = NULL;
@@ -585,24 +634,57 @@ void *do_engine_init(void *data) {
         JSStringRef optimizations_str = JSStringCreateWithUTF8CString(config.optimizations);
         JSValueRef optimizations_ref = JSValueMakeString(ctx, optimizations_str);
         arguments[7] = optimizations_ref;
+
+        JSValueRef compile_opts[config.num_compile_opts];
+        size_t i;
+        for (i=0; i<config.num_compile_opts; i++) {
+            JSStringRef compile_opts_str = JSStringCreateWithUTF8CString(config.compile_opts[i]);
+            compile_opts[i] = JSValueMakeString(ctx, compile_opts_str);
+        }
+        arguments[8] = JSObjectMakeArray(ctx, config.num_compile_opts, compile_opts, NULL);
+
         JSValueRef ex = NULL;
-        JSObjectCallAsFunction(ctx, get_function("planck.repl", "init"), JSContextGetGlobalObject(ctx), 8,
+        JSObjectCallAsFunction(ctx, get_function("planck.repl", "init"), JSContextGetGlobalObject(ctx), 9,
                                arguments, &ex);
         debug_print_value("planck.repl/init", ctx, ex);
+
+        if (ex) {
+            print_value("Error initializing engine: ", ctx, ex);
+        }
     }
 
     display_launch_timing("planck.repl/init");
 
+    char version_script[1024];
+    snprintf(version_script, 1024, "cljs.core._STAR_clojurescript_version_STAR_ = \"%s\";", config.clojurescript_version);
+    evaluate_script(ctx, version_script, "<init>");
+
     if (config.repl) {
-        evaluate_source("text", "(require '[planck.repl :refer-macros [apropos dir find-doc doc source pst]])",
+        evaluate_source("text", "(eval `(~'ns ~'cljs.user (:require ~@(-> @planck.repl/app-env :opts (:repl-requires "
+                                "'[[planck.repl :refer-macros [source doc find-doc apropos dir pst]]])))))",
                         true, false, "cljs.user", "dumb", false, 0);
         display_launch_timing("repl requires");
+    } else {
+        evaluate_source("text", "(require 'planck.repl)",
+                        true, false, "cljs.user", "dumb", false, 0);
+        display_launch_timing("repl code");
     }
-
-    set_print_sender(NULL);
 
     evaluate_script(ctx, "goog.provide('cljs.user');", "<init>");
     evaluate_script(ctx, "goog.require('cljs.core');", "<init>");
+
+    set_print_sender(NULL);
+
+    JSValueRef arguments[0];
+    JSValueRef ex = NULL;
+    JSObjectCallAsFunction(ctx, get_function("planck.repl", "init-data-readers"), JSContextGetGlobalObject(ctx), 0,
+                           arguments, &ex);
+
+    if (ex) {
+        print_value("Error initializing data readers: ", ctx, ex);
+    }
+
+    maybe_load_user_file();
 
     display_launch_timing("engine ready");
 
@@ -686,7 +768,7 @@ void set_print_sender(void (*sender)(const char *msg)) {
 
     evaluate_script(ctx, "cljs.core.set_print_fn_BANG_.call(null,PLANCK_PRINT_FN);", "<init>");
     evaluate_script(ctx, "cljs.core.set_print_err_fn_BANG_.call(null,PLANCK_PRINT_ERR_FN);", "<init>");
-
+    evaluate_script(ctx, "cljs.core._STAR_print_newline_STAR_ = true;", "<init>");
 }
 
 bool engine_print_newline() {

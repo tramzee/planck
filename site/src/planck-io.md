@@ -14,19 +14,31 @@ _Types_
 _Vars_
 
 [as-file](#as-file)<br/>
+[as-relative-path](#as-relative-path)<br/>
 [as-url](#as-url)<br/>
+[copy](#copy)<br/>
 [delete-file](#delete-file)<br/>
 [directory?](#directory?)<br/>
+[exists?](#exists?)<br/>
 [file](#file)<br/>
 [file?](#file?)<br/>
 [file-attributes](#file-attributes)<br/>
+[file-name](#file-name)<br/>
+[hidden-file?](#hidden-file?)<br/>
 [input-stream](#input-stream)<br/>
+[list-files](#list-files)<br/>
 [make-input-stream](#make-input-stream)<br/>
 [make-output-stream](#make-output-stream)<br/>
+[make-parents](#make-parents)<br/>
 [make-reader](#make-reader)<br/>
 [make-writer](#make-writer)<br/>
 [output-stream](#output-stream)<br/>
+[path-elements](#path-elements)<br/>
 [reader](#reader)<br/>
+[regular-file?](#regular-file?)<br/>
+[resource](#resource)<br/>
+[symbolic-link?](#symbolic-link?)<br/>
+[tty?](#tty?)<br/>
 [writer](#writer)<br/>
    
 ## Protocols
@@ -91,11 +103,37 @@ Represents a file.
 `([x])`
 
 Coerce argument to a [`File`](#File).
+
+### <a name="as-relative-path"></a>as-relative-path
+`([x])`
+
+Take an [`as-file`](#as-file)-able thing and return a string if it is
+a relative path, else throws an exception.
   
 ### <a name="as-url"></a>as-url
 `([x])`
 
 Coerce argument to a `goog.Uri`.
+
+### <a name="copy"></a>copy
+`([input output & opts])`
+
+Copies input to output. Returns nil or throws an exception.
+
+Input may be an [`IInputStream`](planck-core.html#IInputStream) or [`IReader`](planck-core.html#IReader) created using `planck.io`, `File`, or
+string.
+
+Output may be an [`IOutputStram`](planck-core.html#IOutputStream) or `IWriter` created using `planck.io`, or [`File`](#File).
+
+The `opts` arg is included for compatibility with `clojure.java.io/copy`
+but ignored. If translating between char and byte representations, UTF-8
+encoding is assumed.
+
+Does not close any streams except those it opens itself (on a [`File`](#File)).
+
+Spec<br/>
+ _args_: `(cat :input any? :output any? :opts (* any?))`<br/>
+ _ret_: `nil?`
 
 ### <a name="delete-file"></a>delete-file
 `([f])`
@@ -105,7 +143,7 @@ Delete file `f`.
 Spec<br/>
  _args_: `(cat :f (or :string string? :file file?))`<br/>
  
-### <a name=""></a>directory?
+### <a name="directory?"></a>directory?
 `([dir])`
 
 Checks if `dir` is a directory.
@@ -113,16 +151,24 @@ Checks if `dir` is a directory.
 Spec<br/>
  _args_: `(cat :dir (or :string string? :file file?))`<br/>
  _ret_: `boolean?`<br/>
- 
-### <a name="file"></a>file
-`([path] [parent & more])`
 
-Returns a [`File`](#File) for given path.  Multiple-arg
-versions treat the first argument as parent and subsequent args as
-children relative to the parent.
+### <a name="exists?"></a>exists?
+`([f])`
+
+Checks if `f` exists on disk.
 
 Spec<br/>
- _args_: `(cat :path-or-parent string? :more (* string?))`<br/>
+ _args_: `(cat :f (or :string string? :file file?))`<br/>
+ _ret_: `boolean?`<br/>
+
+### <a name="file"></a>file
+`([arg] [parent child] [parent child & more])`
+
+Returns a [`File`](#File), passing each arg to [`as-file`](#as-file).  Multiple-arg versions treat the first argument as parent and subsequent 
+args as children relative to the parent.
+
+Spec<br/>
+ _args_: `(cat :path-or-parent any? :more (* any?))`<br/>
  _ret_: `file?`
 
 ### <a name="file?"></a>file?
@@ -142,11 +188,38 @@ Returns a map containing the attributes of the item at a given `path`.
 Spec
  _args_: `(cat :path (nillable? (or :string string? :file file?)))`<br/>
  _ret_: `map?`
- 
+  
+### <a name="file-name"></a>file-name
+`([x])`
+
+Returns the name (the final path element) of `x`.
+
+Spec<br/>
+ _args_: `(cat :x (or :string string? :file file?))`<br/>
+ _ret_: `string?`<br/>
+
+### <a name="hidden-file?"></a>hidden-file?
+`([x])`
+
+Checks if `x` is hidden (name begins with a '.' character).
+
+Spec<br/>
+ _args_: `(cat :x (or :string string? :file file?))`<br/>
+ _ret_: `boolean?`<br/>
+
 ### <a name="input-stream"></a>input-stream
 `([x & opts])`
 
 Attempts to coerce its argument into an open [`IInputStream`](planck-core.html#IInputStream).
+
+### <a name="list-files"></a>list-files
+`([dir])`
+
+Returns a seq of the [`File`](#File)s in `dir` or `nil` if `dir` is not a directory.
+
+Spec
+ _args_: `(cat :dir (or :string string? :file file?))`<br/>
+ _ret_: `(coll-of file?)`
 
 ### <a name="make-input-stream"></a>make-input-stream
 `([x opts])`
@@ -157,6 +230,16 @@ Creates an [`IInputStream`](planck-core.html#IInputStream). See also [`IOFactory
 `([x opts])`
   
 Creates an [`IOutputStream`](planck-core.html#IOutputStream). See also [`IOFactory`](#IOFactory) docs.
+
+### <a name="make-parents"></a>make-parents
+`([f & more])`
+
+Given the same arg(s) as for [`file`](#file), creates all parent directories of
+the file they represent.
+
+Spec<br/>
+ _args_: `(cat :path-or-parent any? :more (* any?))`<br/>
+ _ret_: `boolean?`
   
 ### <a name="make-reader"></a>make-reader
 `([x opts])`
@@ -172,12 +255,60 @@ Creates an `IWriter`. See also [`IOFactory`](#IOFactory) docs.
 `([x & opts])`
 
 Attempts to coerce its argument into an open [`IOutputStream`](planck-core.html#IOutputStream).
-  
+
+### <a name="path-elements"></a>path-elements
+`([x])`
+
+Returns the path elements of `x` as a sequence.
+
+Spec<br/>
+ _args_: `(cat :x (or :string string? :file file?))`<br/>
+ _ret_: `(s/coll-of string?)`<br/>
+
+
 ### <a name="reader"></a>reader
 `([x & opts])`
 
 Attempts to coerce its argument into an open [`IPushbackReader`](planck-core.html#IPushbackReader).
+
+### <a name="regular-file?"></a>regular-file?
+`([f])`
+
+Checks if `f` is a regular file.
+
+Spec<br/>
+ _args_: `(cat :f (or :string string? :file file?))`<br/>
+ _ret_: `boolean?`<br/>
+
+### <a name="resource"></a>resource
+`([n])`
+
+Returns the URI for the named resource, `n`.
   
+The resource must be either a JAR resource, a file resource or a "bundled" resource. JARs and files are expressed relative to the classpath while "bundled" resources are the namespaces bundled with Planck and are referred to by reference to the file that contains the namespace, eg. `cljs.test` is `"cljs/test.cljs"`.
+
+Spec<br/>
+ _args_: `(cat :n (nilable string?))`<br/>
+ _ret_: `(nilable (instance? Uri %))`<br/>
+
+### <a name="symbolic-link?"></a>symbolic-link?
+`([f])`
+
+Checks if `f` is a symbolic link.
+
+Spec<br/>
+ _args_: `(cat :f (or :string string? :file file?))`<br/>
+ _ret_: `boolean?`<br/>
+
+### <a name="tty?"></a>tty?
+`([x])`
+
+Checks if `x` is a file descriptor associated with a terminal. `x` may be a file descriptor number or one of `planck.core/*in*`, `cljs.core/*out*` or `planck.core/*err*`.
+
+Spec<br/>
+_x_: `(or :fd-num (and integer? (complement neg?)) :reader #(implements? planck.core/IReader %) :writer #(implements? planck.core/IWriter %))`<br/>
+_ret_: `boolean?`<br/>
+
 ### <a name="writer"></a>writer
 `([x & opts])`
 

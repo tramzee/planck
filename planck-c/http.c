@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #include <JavaScriptCore/JavaScript.h>
 
@@ -34,7 +35,7 @@ size_t header_to_object_callback(char *buffer, size_t size, size_t nitems, void 
     size_t i;
     for (i = 0; i < size * nitems; i++) {
         if (buffer[i] == ':' && key_end == -1) {
-            key_end = i;
+            key_end = (int)i;
         }
 
         if (buffer[i] == '\r' && buffer[i + 1] == '\n') {
@@ -51,12 +52,41 @@ size_t header_to_object_callback(char *buffer, size_t size, size_t nitems, void 
 
     JSStringRef key_str = JSStringCreateWithUTF8CString(key);
 
-    int val_start = key_end + 2;
-    size_t val_len = val_end - val_start;
-    char val[val_len + 1];
-    strncpy(val, buffer + val_start, val_len);
-    val[val_len] = '\0';
-    JSStringRef val_str = JSStringCreateWithUTF8CString(val);
+    size_t val_start = (size_t)key_end + 1;
+
+    // Trim whitespace from beginning of val
+    for (i = val_start; i < val_end; i++) {
+        if (buffer[i] == ' ' || buffer[i] == '\t') {
+            val_start++;
+        } else {
+            break;
+        }
+    }
+
+    // Trim whitespace from end of val
+    for (i = val_end - 1; i > val_start; i--) {
+        if (buffer[i] == ' ' || buffer[i] == '\t') {
+            val_end--;
+        } else {
+            break;
+        }
+    }
+
+    size_t val_len;
+    JSStringRef val_str;
+
+    if (val_start < val_end) {
+        val_len = val_end - val_start;
+        char val[val_len + 1];
+        strncpy(val, buffer + val_start, val_len);
+        val[val_len] = '\0';
+        val_str = JSStringCreateWithUTF8CString(val);
+    } else {
+        char val[1];
+        val[0] = '\0';
+        val_str = JSStringCreateWithUTF8CString(val);
+    }
+    
     JSValueRef val_ref = JSValueMakeString(ctx, val_str);
 
     JSObjectSetProperty(ctx, *state->headers, key_str, val_ref, kJSPropertyAttributeReadOnly, NULL);
@@ -111,6 +141,11 @@ JSValueRef function_http_request(JSContextRef ctx, JSObjectRef function, JSObjec
         if (JSValueIsNumber(ctx, timeout_ref)) {
             timeout = (time_t) JSValueToNumber(ctx, timeout_ref, NULL);
         }
+        JSValueRef binary_response_ref = JSObjectGetProperty(ctx, opts, JSStringCreateWithUTF8CString("binary-response"), NULL);
+        bool binary_response = false;
+        if (JSValueIsBoolean(ctx, binary_response_ref)) {
+            binary_response = JSValueToBoolean(ctx, binary_response_ref);
+        }
         JSValueRef method_ref = JSObjectGetProperty(ctx, opts, JSStringCreateWithUTF8CString("method"), NULL);
         char *method = value_to_c_string(ctx, method_ref);
         JSValueRef body_ref = JSObjectGetProperty(ctx, opts, JSStringCreateWithUTF8CString("body"), NULL);
@@ -125,8 +160,39 @@ JSValueRef function_http_request(JSContextRef ctx, JSObjectRef function, JSObjec
         curl_easy_setopt(handle, CURLOPT_CUSTOMREQUEST, method);
         curl_easy_setopt(handle, CURLOPT_URL, url);
 
+        JSValueRef user_agent_ref = JSObjectGetProperty(ctx, opts, JSStringCreateWithUTF8CString("user-agent"), NULL);
+        char *user_agent = NULL;
+        if (!JSValueIsUndefined(ctx, user_agent_ref)) {
+            user_agent = value_to_c_string(ctx, user_agent_ref);
+            curl_easy_setopt(handle, CURLOPT_USERAGENT, user_agent);
+        }
+
+        JSValueRef follow_redirects_ref = JSObjectGetProperty(ctx, opts, JSStringCreateWithUTF8CString("follow-redirects"), NULL);
+        if (JSValueIsBoolean(ctx, follow_redirects_ref)) {
+            if (JSValueToBoolean(ctx, follow_redirects_ref)) {
+                curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1);
+
+                JSValueRef max_redirects_ref = JSObjectGetProperty(ctx, opts, JSStringCreateWithUTF8CString("max-redirects"), NULL);
+                if (JSValueIsNumber(ctx, max_redirects_ref)) {
+                    long max_redirects = (long)JSValueToNumber(ctx, max_redirects_ref, NULL);
+                    curl_easy_setopt(handle, CURLOPT_MAXREDIRS, max_redirects);
+                }
+            }
+        }
+        
         JSObjectRef result = JSObjectMake(ctx, NULL, NULL);
         JSValueProtect(ctx, result);
+
+        JSValueRef insecure_ref = JSObjectGetProperty(ctx, opts, JSStringCreateWithUTF8CString("insecure"), NULL);
+        bool insecure = false;
+        if(JSValueIsBoolean(ctx, insecure_ref)) {
+            insecure = JSValueToBoolean(ctx, insecure_ref);
+        }
+
+        if(insecure) {
+            curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 0L);
+            curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 0L);
+        }
 
         char *socket = NULL;
         JSValueRef socket_ref = JSObjectGetProperty(ctx, opts, JSStringCreateWithUTF8CString("socket"), NULL);
@@ -206,12 +272,26 @@ JSValueRef function_http_request(JSContextRef ctx, JSObjectRef function, JSObjec
         curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
 
         free(body);
+        free(user_agent);
 
         // printf("%d bytes, %x\n", body_state.offset, body_state.data);
         if (body_state.data != NULL) {
-            JSStringRef body_str = JSStringCreateWithUTF8CString(body_state.data);
-            JSObjectSetProperty(ctx, result, JSStringCreateWithUTF8CString("body"), JSValueMakeString(ctx, body_str),
-                                kJSPropertyAttributeReadOnly, NULL);
+            if (binary_response) {
+                JSValueRef* bytes = malloc(sizeof(JSValueRef)*body_state.length);
+                int i;
+                for (i = 0; i < body_state.length; i++) {
+                    bytes[i] = JSValueMakeNumber(ctx, (uint8_t )body_state.data[i]);
+                }
+                JSObjectSetProperty(ctx, result, JSStringCreateWithUTF8CString("body"),
+                                    JSObjectMakeArray(ctx, body_state.length, bytes, NULL),
+                                    kJSPropertyAttributeReadOnly, NULL);
+                free(bytes);
+            } else {
+                JSStringRef body_str = JSStringCreateWithUTF8CString(body_state.data);
+                JSObjectSetProperty(ctx, result, JSStringCreateWithUTF8CString("body"),
+                                    JSValueMakeString(ctx, body_str),
+                                    kJSPropertyAttributeReadOnly, NULL);
+            }
             free(body_state.data);
         }
 
@@ -234,7 +314,7 @@ JSValueRef function_http_request(JSContextRef ctx, JSObjectRef function, JSObjec
 int main(int argc, char **argv) {
     CURL *curl = curl_easy_init();
     if(curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, "http://planck-repl.org");
+        curl_easy_setopt(curl, CURLOPT_URL, "https://planck-repl.org");
         curl_easy_setopt(curl, CURLOPT_HEADER, 1L);
         curl_easy_perform(curl);
     }

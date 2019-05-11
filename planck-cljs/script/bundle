@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [ "${VERBOSE_BUILD:-0}" == "1" ]; then
+  set -x
+fi
+
 # Run this from the planck/planck-cljs directory
 
 # Make sure we fail and exit on the command that actually failed.
@@ -70,6 +74,10 @@ then
 fi
 
 cd out
+
+buildcache=../.buildcache-$GCC_RELEASE-$GCL_RELEASE
+mkdir -p $buildcache
+
 # Make sure we don't bundle test.check
 rm -rf clojure/test/check*
 # We don't need to bundle the extra cljs/core$macros.cljc file
@@ -90,19 +98,36 @@ for file in `find . -name '*.js' -o -name '*.cljs' -o -name '*.cljc' -o -name '*
 do 
 file=${file:2}
 cp -p $file $file.bak
+mkdir -p `dirname $buildcache/$file`
+
+if [ $CLOSURE_OPTIMIZATIONS != "NONE" ] || [ $AOT_DECODE_SOURCE_MAPS == "1" ] 
+then
+  crc=`shasum $file | cut -f1 -d" "`
+fi
+
 if [ $CLOSURE_OPTIMIZATIONS != "NONE" ] && [ ${file: -3} == ".js" ] && [ "${file: -7}" != "deps.js" ] && [ "${file: -9}" != "bundle.js" ] && [ "${file: -9}" != "jscomp.js" ] && [ "${file: -6}" != "csv.js" ] && [ "${file: -19}" != "performancetimer.js" ]
 then
-  if [ ! -f $file.optim ] || [ $file -nt $file.optim ]
+  if [ ! -f $buildcache/$file.$crc.optim ] 
   then
-    if [ -f $file.map ]
+    if [ ! -f $file.optim ] || [ $file -nt $file.optim ]
     then
-      java -jar ../../compiler/closure-compiler-v$CLOSURE_RELEASE.jar --compilation_level $CLOSURE_OPTIMIZATIONS --language_in ECMASCRIPT3 --language_out ECMASCRIPT3 --process_closure_primitives false --js $file --js_output_file $file.optim --source_map_input $file\|$file.map --create_source_map $file.map.optim
-    else
-      java -jar ../../compiler/closure-compiler-v$CLOSURE_RELEASE.jar --compilation_level $CLOSURE_OPTIMIZATIONS --language_in ECMASCRIPT3 --language_out ECMASCRIPT3 --process_closure_primitives false --js $file --js_output_file $file.optim
+      if [ -f $file.map ]
+      then
+        java -jar ../../compiler/closure-compiler-v$GCC_RELEASE.jar --compilation_level $CLOSURE_OPTIMIZATIONS --language_in ECMASCRIPT6 --language_out ECMASCRIPT6 --process_closure_primitives false --js $file --js_output_file $file.optim --source_map_input $file\|$file.map --create_source_map $file.map.optim 
+      else
+        java -jar ../../compiler/closure-compiler-v$GCC_RELEASE.jar --compilation_level $CLOSURE_OPTIMIZATIONS --language_in ECMASCRIPT6 --language_out ECMASCRIPT6 --process_closure_primitives false --js $file --js_output_file $file.optim --create_source_map $file.map
+      fi
     fi
-    echo -n "."
+    cp $file.optim $file
+    rm -f $buildcache/$file.*.optim
+    rm -f $buildcache/$file.*.map
+    cp $file.optim $buildcache/$file.$crc.optim
+    cp $file.map $buildcache/$file.$crc.map # Optimised maps are never cached
+  else
+    cp $buildcache/$file.$crc.optim $file
+    cp $buildcache/$file.$crc.map $file.map
   fi
-  cp $file.optim $file
+  echo -n "."
 fi
 if [ ${file: -4} == ".map" ] && [ -f $file.optim ]
 then
@@ -111,18 +136,31 @@ fi
 # For the second pass, we will have the planck binary available and we can use it to AOT decode source maps
 if [ $AOT_DECODE_SOURCE_MAPS == "1" ] && [ ${file: -4} == ".map" ] && [ -f ../../planck-c/build/planck ]
 then
+  if [ ! -f $buildcache/$file.$crc.aot ]
+  then
+    ../../planck-c/build/planck ../script/decode.cljs $file > $file.aot
+    cp $file.aot $file
+    rm -f $buildcache/$file.*.aot
+    cp $file.aot $buildcache/$file.$crc.aot
+  else
+    cp $buildcache/$file.$crc.aot $file
+  fi
   echo -n "."
-  ../../planck-c/build/planck ../script/decode.cljs $file
 fi
 uncompressed_file_size=`wc -c $file | sed -e 's/^ *//' | cut -d' ' -f1`
 gzip -9 $file
 mv $file.bak $file
 filegz=$file.gz
+filegz_clean=${filegz//\$/_}
+if [ "$filegz" != "$filegz_clean" ]
+then
+  mv $filegz $filegz_clean
+fi
+filegz=$filegz_clean
 ${XXDI} $filegz >> ../bundle.c
 rm $filegz
 data_ref=${filegz//\//_}
 data_ref=${data_ref//\./_}
-data_ref=${data_ref//\$/_}
 echo "unsigned int ${data_ref}_len_uncompressed = ${uncompressed_file_size};" >> ../bundle.c
 cat <<EOF >> ../bundle_dict.c
 	else if (strcmp("${file}", path) == 0) {

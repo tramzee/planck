@@ -3,7 +3,7 @@
   (:refer-clojure :exclude [lift-ns])
   (:require
    [clojure.string :as string]
-   [fipp.engine :refer [pprint-document]]
+   [fipp.engine]
    [fipp.visit :refer [visit visit*]]
    [goog.object :as gobj]
    [planck.themes]))
@@ -52,12 +52,27 @@
               (recur new-ns entries (assoc lm (strip-ns k) v)))))
         [ns lm]))))
 
+(defn- visit-default
+  "Delegates to ClojureScript for printing a value."
+  [x]
+  [:text (binding [*print-meta* false] (pr-str x))])
+
 (defrecord PlanckPrinter [symbols print-meta print-length print-level print-namespace-maps theme keyword-ns demunge-macros-symbols?]
 
   fipp.visit/IVisitor
 
   (visit-unknown [this x]
     (cond
+      (instance? Atom x)
+      (pretty-coll this "#object [" ['cljs.core.Atom {:val @x}] :line "]" visit)
+      (instance? Volatile x)
+      (pretty-coll this "#object [" ['cljs.core.Volatile {:val @x}] :line "]" visit)
+      (instance? Delay x)
+      (pretty-coll this "#object[" ['cljs.core.Delay {:status (if (nil? (.-f x)) :ready :pending),
+                                                      :val    (.-value x)}
+                                    ] :line "]" visit)
+      (satisfies? IPrintWithWriter x)
+      (visit-default x)
       (instance? Eduction x)
       (if print-length
         (fipp.visit/visit-seq this (into [] (take (inc print-length)) x))
@@ -73,7 +88,7 @@
           (fn [printer [k v]]
             [:span (visit printer k) " " (visit printer v)])))
       :else
-      [:text (binding [*print-meta* false] (pr-str x))]))
+      (visit-default x)))
 
   (visit-nil [this]
     (wrap-theme :results-font theme "nil"))
@@ -101,9 +116,11 @@
     (wrap-theme :results-font theme (pr-str x)))
 
   (visit-seq [this x]
-    (if-let [pretty (symbols (first x))]
-      (pretty this x)
-      (pretty-coll this "(" x :line ")" visit)))
+    (if (instance? PersistentQueue x)
+      (pretty-coll this "#queue [" x :line "]" visit)
+      (if-let [pretty (symbols (first x))]
+        (pretty this x)
+        (pretty-coll this "(" x :line ")" visit))))
 
   (visit-vector [this x]
     (pretty-coll this "[" x :line "]" visit))
@@ -143,6 +160,17 @@
       (fn [printer [k v]]
         [:span (visit printer k) " " (visit printer v)]))))
 
+(defn pprint-document [document options]
+  (let [options (merge {:width 70} options)]
+    (->> (fipp.engine/serialize document)
+      (eduction
+        fipp.engine/annotate-rights
+        (fipp.engine/annotate-begins options)
+        (fipp.engine/format-nodes options))
+      (run! print)))
+  (when-not (:no-newline? options)
+    (println)))
+
 (defn pprint
   ([x] (pprint x {}))
   ([x options]
@@ -151,8 +179,8 @@
                           :print-level          *print-level*
                           :print-meta           *print-meta*
                           :print-namespace-maps *print-namespace-maps*
-                          :theme                planck.themes/dumb
-                          :pprint-document      fipp.engine/pprint-document}
+                          :theme                ^:private-var-access-nowarn planck.themes/dumb
+                          :pprint-document      pprint-document}
          full-opts       (merge defaults options)
          pprint-document (:pprint-document full-opts)
          printer         (map->PlanckPrinter full-opts)]

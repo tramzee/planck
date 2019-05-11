@@ -3,8 +3,16 @@
 while [ $# -gt 0 ]
 do
   case "$1" in
-    -fast)
+    --fast)
       export FAST_BUILD=1
+      shift
+      ;;
+    --verbose)
+      export VERBOSE_BUILD=1
+      shift
+      ;;
+    -R*)
+      export RESOLVE_ALIAS="${1:2}"
       shift
       ;;
     -Sdeps)
@@ -18,6 +26,15 @@ do
   esac
 done
 
+if [ "${VERBOSE_BUILD:-0}" == "1" ]; then
+  set -x
+fi
+
+if [ -z ${FAST_BUILD+set} ]; then
+  echo "Creating an optimized build, using build cache to speed up build."
+  echo "Specifying --fast skips optimizations and takes less than two minutes."
+fi
+
 #----------------------------------------------------
 # Exit if the last command failed, indicating 
 # that there was a build failure
@@ -30,9 +47,14 @@ checkCmdSuccess() {
     fi
 }
 
-export CLOSURE_RELEASE="20170910"
-export CLOSURE_JS_RELEASE=${CLOSURE_RELEASE}.0.1
+export GCC_RELEASE="20190301"
+export CLOSURE_JS_RELEASE=${GCC_RELEASE}.0.0
 script/get-closure-compiler
+
+export GCL_RELEASE="20190301"
+script/get-closure-library
+
+script/get-build-cache
 
 NON_BUNDLED_SRC=`find planck-cljs -type f -newer planck-c/bundle.c`
 BUNDLE_SIZE=$(wc -c < planck-c/bundle.c)
@@ -49,6 +71,9 @@ if [ -n "$NON_BUNDLED_SRC" ] || [ ! -d planck-c/build ] || [ $BUNDLE_SIZE -le 40
   # We need them to be compiled by the 1st stage binary
   rm -f planck-cljs/out/planck/*macros*
   rm -f planck-cljs/out/planck/pprint/*macros*
+  rm -f planck-cljs/out/planck/analyzer/macros/*macros*
+  rm -f planck-cljs/out/planck/compiler/macros/*macros*
+  rm -f planck-cljs/out/planck/env/macros/*macros*
   rm -f planck-cljs/out/clojure/template*macros*
   rm -f planck-cljs/out/cljs/test*macros*
   rm -f planck-cljs/out/cljs/spec/alpha*macros*
@@ -78,9 +103,9 @@ if [ -n "$NON_BUNDLED_SRC" ] || [ ! -d planck-c/build ] || [ $BUNDLE_SIZE -le 40
   
   echo "### AOT compiling macro namespaces"
   mkdir -p planck-cljs/out/macros-tmp
-  planck-c/build/planck -sk planck-cljs/out/macros-tmp -e"(require 'cljs.analyzer)" -e"(do (set! cljs.analyzer/*cljs-warnings* (assoc cljs.analyzer/*cljs-warnings* :undeclared-var false)) nil)" -e "(require-macros 'planck.repl 'planck.core 'planck.shell 'planck.from.io.aviso.ansi 'clojure.template 'cljs.spec.alpha 'cljs.spec.test.alpha 'cljs.spec.gen.alpha 'cljs.test)"
+  planck-c/build/planck -sk planck-cljs/out/macros-tmp -e"(require 'cljs.analyzer)" -e"(do (set! cljs.analyzer/*cljs-warnings* (assoc cljs.analyzer/*cljs-warnings* :undeclared-var false)) nil)" -e "(require-macros 'planck.repl 'planck.core 'planck.shell 'planck.from.io.aviso.ansi 'clojure.template 'cljs.spec.alpha 'cljs.spec.test.alpha 'cljs.spec.gen.alpha 'cljs.test 'cljs.pprint 'cljs.analyzer.macros 'cljs.compiler.macros 'cljs.env.macros)"
   checkCmdSuccess
-  
+
   mv planck-cljs/out/macros-tmp/planck_SLASH_repl\$macros.js planck-cljs/out/planck/repl\$macros.js
   mv planck-cljs/out/macros-tmp/planck_SLASH_repl\$macros.cache.json planck-cljs/out/planck/repl\$macros.cache.json
   mv planck-cljs/out/macros-tmp/planck_SLASH_repl\$macros.js.map.json planck-cljs/out/planck/repl\$macros.js.map.json
@@ -98,7 +123,10 @@ if [ -n "$NON_BUNDLED_SRC" ] || [ ! -d planck-c/build ] || [ $BUNDLE_SIZE -le 40
   mv planck-cljs/out/macros-tmp/clojure_SLASH_template\$macros.js.map.json planck-cljs/out/clojure/template\$macros.js.map.json
   mv planck-cljs/out/macros-tmp/cljs_SLASH_test\$macros.js planck-cljs/out/cljs/test\$macros.js
   mv planck-cljs/out/macros-tmp/cljs_SLASH_test\$macros.cache.json planck-cljs/out/cljs/test\$macros.cache.json
-  mv planck-cljs/out/macros-tmp/cljs_SLASH_test\$macros.js.map.json planck-cljs/out/planck/test\$macros.js.map.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_test\$macros.js.map.json planck-cljs/out/cljs/test\$macros.js.map.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_pprint\$macros.js planck-cljs/out/cljs/pprint\$macros.js
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_pprint\$macros.cache.json planck-cljs/out/cljs/pprint\$macros.cache.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_pprint\$macros.js.map.json planck-cljs/out/cljs/pprint\$macros.js.map.json
   mv planck-cljs/out/macros-tmp/cljs_SLASH_spec_SLASH_alpha\$macros.js planck-cljs/out/cljs/spec/alpha\$macros.js
   mv planck-cljs/out/macros-tmp/cljs_SLASH_spec_SLASH_alpha\$macros.cache.json planck-cljs/out/cljs/spec/alpha\$macros.cache.json
   mv planck-cljs/out/macros-tmp/cljs_SLASH_spec_SLASH_alpha\$macros.js.map.json planck-cljs/out/cljs/spec/alpha\$macros.js.map.json
@@ -108,6 +136,15 @@ if [ -n "$NON_BUNDLED_SRC" ] || [ ! -d planck-c/build ] || [ $BUNDLE_SIZE -le 40
   mv planck-cljs/out/macros-tmp/cljs_SLASH_spec_SLASH_gen_SLASH_alpha\$macros.js planck-cljs/out/cljs/spec/gen/alpha\$macros.js
   mv planck-cljs/out/macros-tmp/cljs_SLASH_spec_SLASH_gen_SLASH_alpha\$macros.cache.json planck-cljs/out/cljs/spec/gen/alpha\$macros.cache.json
   mv planck-cljs/out/macros-tmp/cljs_SLASH_spec_SLASH_gen_SLASH_alpha\$macros.js.map.json planck-cljs/out/cljs/spec/gen/alpha\$macros.js.map.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_analyzer_SLASH_macros\$macros.js planck-cljs/out/cljs/analyzer/macros\$macros.js
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_analyzer_SLASH_macros\$macros.cache.json planck-cljs/out/cljs/analyzer/macros\$macros.cache.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_analyzer_SLASH_macros\$macros.js.map.json planck-cljs/out/cljs/analyzer/macros\$macros.js.map.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_compiler_SLASH_macros\$macros.js planck-cljs/out/cljs/compiler/macros\$macros.js
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_compiler_SLASH_macros\$macros.cache.json planck-cljs/out/cljs/compiler/macros\$macros.cache.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_compiler_SLASH_macros\$macros.js.map.json planck-cljs/out/cljs/compiler/macros\$macros.js.map.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_env_SLASH_macros\$macros.js planck-cljs/out/cljs/env/macros\$macros.js
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_env_SLASH_macros\$macros.cache.json planck-cljs/out/cljs/env/macros\$macros.cache.json
+  mv planck-cljs/out/macros-tmp/cljs_SLASH_env_SLASH_macros\$macros.js.map.json planck-cljs/out/cljs/env/macros\$macros.js.map.json
   
   rm -rf planck-cljs/out/macros-tmp
   
@@ -125,5 +162,7 @@ cd planck-c/build
 make > /dev/null
 checkCmdSuccess
 cd ../..
+
+cp planck-man/planck.1 planck-man/plk.1
 
 echo "Binary located at $(pwd)/planck-c/build/planck"

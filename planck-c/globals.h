@@ -1,8 +1,6 @@
 // Global variables used throughout Planck
 
-#define PLANCK_VERSION "2.11.0"
-
-#define EXIT_SUCCESS_INTERNAL -257
+#define PLANCK_VERSION "2.22.0"
 
 // Configuration
 
@@ -47,6 +45,11 @@ struct config {
 
     char *socket_repl_host;
     int socket_repl_port;
+
+    char *clojurescript_version;
+
+    size_t num_compile_opts;
+    char **compile_opts;
 };
 
 extern struct config config;

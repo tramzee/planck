@@ -3,7 +3,11 @@
    [clojure.spec.test.alpha :as st]
    [clojure.test :refer [run-tests]]
    [fipp.edn]
+   [general.closure-libs-test]
+   [general.cljsjs-libs-test]
    [general.core-test]
+   [general.closure-defines-test]
+   [general.data-readers-test]
    [general.fipp-test]
    [planck.closure-test]
    [planck.core :refer [exit]]
@@ -27,5 +31,9 @@
     'planck.js-deps-test
     'planck.http-test
     'planck.closure-test
+    'general.closure-libs-test
+    'general.cljsjs-libs-test
     'general.core-test
+    'general.closure-defines-test
+    'general.data-readers-test
     'general.fipp-test))
