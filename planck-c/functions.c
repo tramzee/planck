@@ -13,6 +13,12 @@
 #include <errno.h>
 #include <time.h>
 
+#ifdef __APPLE_CC__
+#include <GLUT/glut.h>
+#else
+#include <GL/glut.h>
+#endif
+
 #include <JavaScriptCore/JavaScript.h>
 
 #include "bundle.h"
@@ -1536,4 +1542,81 @@ JSValueRef function_isatty(JSContextRef ctx, JSObjectRef function, JSObjectRef t
     }
   }
   return JSValueMakeNull(ctx);
+}
+
+static JSContextRef stashedContext = NULL;
+static JSObjectRef vertexFunction = NULL;
+
+// Clears the current window and draws a triangle.
+void display() {
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glBegin(GL_POLYGON);
+
+    //fprintf(stderr, "display\n");
+    JSValueRef rv = JSObjectCallAsFunction(stashedContext, vertexFunction, NULL, 0, NULL, NULL);
+    double x = JSValueToNumber(stashedContext, rv, NULL);
+    //fprintf(stderr, "%f\n", x);
+
+    glColor3f(1, 0, 0); glVertex3f(x, -0.75, 0.5);
+    glColor3f(0, 1, 0); glVertex3f(0.6, -0.75, 0);
+    glColor3f(0, 0, 1); glVertex3f(0, 0.75, 0);
+    glEnd();
+
+    glFlush();
+
+    // Hack to get the GLUT loop to call back again (otherwise it thinks nothing has changed?)
+    glutPostRedisplay();
+}
+
+// Initializes GLUT, the display mode, and main window; registers callbacks;
+// enters the main event loop.
+int fake_main(int argc, char** argv) {
+
+    // Use a single buffered window in RGB mode (as opposed to a double-buffered
+    // window or color-index mode).
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
+
+    // Position window at (80,80)-(480,380) and give it a title.
+    glutInitWindowPosition(80, 80);
+    glutInitWindowSize(400, 300);
+    glutCreateWindow("A Simple Triangle");
+
+    // Tell GLUT that whenever the main window needs to be repainted that it
+    // should call the function display().
+    glutDisplayFunc(display);
+
+    // Tell GLUT to start reading and processing events.  This function
+    // never returns; the program only exits when the user closes the main
+    // window or kills the process.
+    //glutMainLoop();
+
+}
+
+static int initialized = 0;
+JSValueRef function_test_opengl(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                size_t argc, const JSValueRef args[], JSValueRef *exception) {
+
+    if (!initialized) {
+        const char *argv[1];
+        argv[0] = "planck";
+        fake_main(1, argv);
+        initialized = 1;
+    }
+
+    stashedContext = ctx;
+    vertexFunction = JSValueToObject(ctx, args[0], NULL);
+
+    if (false) {
+        // Draw once and return to REPL
+        glutPostRedisplay();
+        glutCheckLoop();
+    } else {
+        // Go into infinite main loop
+        glutMainLoop();
+    }
+
+    return JSValueMakeNull(ctx);
 }

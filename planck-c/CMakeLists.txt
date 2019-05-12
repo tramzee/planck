@@ -115,3 +115,10 @@ elseif(UNIX)
    find_package(Threads)
    target_link_libraries(planck ${CMAKE_THREAD_LIBS_INIT})
 endif(APPLE)
+
+find_package(OpenGL REQUIRED)
+find_package(GLUT REQUIRED)
+
+include_directories( ${OPENGL_INCLUDE_DIRS}  ${GLUT_INCLUDE_DIRS} )
+
+target_link_libraries(planck ${OPENGL_LIBRARIES} ${GLUT_LIBRARY} )
