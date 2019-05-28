@@ -1,6 +1,7 @@
 ## Setup
 
 <img width="100" align="right" style="margin: 0ex 1em" src="img/setup.jpg">
+
 Planck runs on macOS and Linux. 
 
 Planck requires no external dependencies. (There is no need for either the Java JVM or Node.js.)
@@ -23,7 +24,7 @@ sudo apt-get update
 sudo apt-get install planck
 ```
 
-For other Linux distros, see Building below.
+For other Linux distros, [binary downloads](https://planck-repl.org/binaries/) are available for some distros. Otherwise, see Building below.
 
 #### Install Master
 

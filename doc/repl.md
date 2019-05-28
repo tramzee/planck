@@ -1,6 +1,7 @@
 ## REPL
 
 <img width="130" align="right" style="margin: 0ex 1em" src="img/repl.jpg">
+
 If you don't provide any `-i` or `-e` options or args to `plk` when launching it (or if you explicitly specify `-r` or `-​-​repl` as the _main-opt_), Planck will enter an interactive Read-Eval-Print Loop, or _REPL_.
 
 ```
@@ -105,7 +106,7 @@ If you evaluate a form that prints lots of output—for example, `(range)`—you
 
 ###  Color Themes
 
-Planck employs various colors for the REPL prompt, results, errors, _etc._ If you'd prefer to work in a monochrome REPL, pass `-t plain` or `-​-theme plain` when starting Planck.
+Planck employs various colors for the REPL prompt, results, errors, _etc._ If you'd prefer to work in a monochrome REPL, pass `-t plain` or `-​-theme plain` when starting Planck, or alternatively set the [`NO_COLOR`](https://no-color.org) environment variable.
 
 Planck attempts to automatically detect if you are running in a light or dark terminal (first checking and honoring the `COLORFGBG` environment variable, if set) and picks the light or dark theme, which adjusts the colors accordingly. If this detection fails, you can always override it via `-t light` or `-t dark`.
 

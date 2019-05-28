@@ -1,6 +1,7 @@
 ## Dependencies
 
 <img width="100" align="right" style="margin: 0ex 1em" src="img/dependencies.jpg">
+
 Source executed via Planck can depend on other bootstrapped-compatible libraries. To do so, the library must be on Planck's classpath, available either as source on an accessible filesystem, or bundled in a JAR.
 
 > Planck can consume conventional JARs meant for use with ClojureScript obtained from [Clojars](https://clojars.org) or elsewhere.
@@ -97,7 +98,7 @@ boot -d andare:0.9.0 -d org.clojure/test.check:0.10.0-alpha3
 
 ### Bundled Deps
 
-Planck ships with many of the deps that are available to conventional ClojureScript code. In particular this includes [the majority of the Google Closure Library](gcl.html) as well as these namespaces:
+Planck ships with many of the deps that are available to conventional ClojureScript code. In particular this includes [the majority of the Google Closure Library](https://cljdoc.org/d/planck/planck/CURRENT/doc/gcl) as well as these namespaces:
 
 * `cljs.test`
 * `clojure.core.reducers`

@@ -2,10 +2,16 @@
 All notable changes to this project will be documented in this file. This change log follows the conventions of [keepachangelog.com](http://keepachangelog.com/).
 
 ## [Unreleased]
+### Fixed
+- `tty?` spec refers to `planck.core/IWriter` ([#928](https://github.com/planck-repl/planck/issues/928))
+
+## [2.23.0] - 2019-05-19
 ### Added
 - Add `planck.io/tty?` ([#911](https://github.com/planck-repl/planck/issues/911))
 - Add -keep-gcl option to the clean script
 - Ignore `*.swp` files
+- Support [`NO_COLOR`](https://no-color.org) ([#923](https://github.com/planck-repl/planck/issues/923))
+- Auto complete for `#queue`, `#inst`, _etc_. ([#926](https://github.com/planck-repl/planck/issues/926))
 
 ### Changed
 - Re-enable FTL JIT on macOS ([#820](https://github.com/planck-repl/planck/issues/820))
@@ -823,7 +829,8 @@ All notable changes to this project will be documented in this file. This change
 ### Added
 - Initial release.
 
-[Unreleased]: https://github.com/mfikes/planck/compare/2.22.0...HEAD
+[Unreleased]: https://github.com/mfikes/planck/compare/2.23.0...HEAD
+[2.23.0]: https://github.com/mfikes/planck/compare/2.22.0...2.23.0
 [2.22.0]: https://github.com/mfikes/planck/compare/2.21.0...2.22.0
 [2.21.0]: https://github.com/mfikes/planck/compare/2.20.0...2.21.0
 [2.20.0]: https://github.com/mfikes/planck/compare/2.19.1...2.20.0
