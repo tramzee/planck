@@ -159,3 +159,6 @@ JSValueRef function_getenv(JSContextRef ctx, JSObjectRef function, JSObjectRef t
 
 JSValueRef function_isatty(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
                            size_t argc, const JSValueRef args[], JSValueRef *exception);
+
+JSValueRef function_test_shared_structs(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                        size_t argc, const JSValueRef args[], JSValueRef *exception);

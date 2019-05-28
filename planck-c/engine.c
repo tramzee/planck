@@ -524,6 +524,8 @@ void *do_engine_init(void *data) {
     register_global_function(ctx, "PLANCK_GETENV", function_getenv);
 
     register_global_function(ctx, "PLANCK_ISATTY", function_isatty);
+    
+    register_global_function(ctx, "PLANCK_TEST_SHARED_STRUCTS", function_test_shared_structs);
 
     display_launch_timing("register fns");
 

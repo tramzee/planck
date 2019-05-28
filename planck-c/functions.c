@@ -1537,3 +1537,23 @@ JSValueRef function_isatty(JSContextRef ctx, JSObjectRef function, JSObjectRef t
   }
   return JSValueMakeNull(ctx);
 }
+
+struct aStruct {
+    int32_t i;
+    char buf[1024];
+    char someChar;
+    int someInt;
+};
+
+JSValueRef function_test_shared_structs(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                                        size_t argc, const JSValueRef args[], JSValueRef *exception) {
+    if (argc == 1 && JSValueGetType(ctx, args[0]) == kJSTypeObject) {
+        JSObjectRef obj = JSValueToObject(ctx, args[0], exception);
+        if (obj) {
+            struct aStruct *foo = JSObjectGetTypedArrayBytesPtr(ctx, obj, exception);
+            fprintf(stderr, "foo->i: %d\nfoo->buf[0]: %c\nfoo->buf[1]: %c\nfoo->someChar: %c\nfoo->someInt: %d\n",
+                    foo->i, foo->buf[0], foo->buf[1], foo->someChar, foo->someInt);
+        }
+    }
+    return JSValueMakeNull(ctx);
+}
