@@ -6,6 +6,7 @@
 
 #include <stdlib.h>
 #include <dlfcn.h>
+#include <sys/errno.h>
 #include <sys/utsname.h>
 
 #include "ffi.h"
