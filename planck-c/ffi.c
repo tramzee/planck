@@ -36,6 +36,10 @@ JSValueRef function_dlopen(JSContextRef ctx, JSObjectRef function, JSObjectRef t
             JSValueRef rv = c_string_to_value(ctx, handle_str);
             free(handle_str);
             return rv;
+        } else {
+            JSValueRef arguments[1];
+            arguments[0] = c_string_to_value(ctx, dlerror());
+            *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
         }
     }
 
@@ -61,6 +65,10 @@ JSValueRef function_dlsym(JSContextRef ctx, JSObjectRef function, JSObjectRef th
             JSValueRef rv = c_string_to_value(ctx, fp_str);
             free(fp_str);
             return rv;
+        } else {
+            JSValueRef arguments[1];
+            arguments[0] = c_string_to_value(ctx, dlerror());
+            *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
         }
     }
 
@@ -76,7 +84,12 @@ JSValueRef function_dlclose(JSContextRef ctx, JSObjectRef function, JSObjectRef 
         void *handle = str_to_void_star(handle_str);
         free(handle_str);
 
-        dlclose(handle);
+        int rv = dlclose(handle);
+        if (rv == -1) {
+            JSValueRef arguments[1];
+            arguments[0] = c_string_to_value(ctx, dlerror());
+            *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+        }
     }
 
     return JSValueMakeNull(ctx);
@@ -172,7 +185,18 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
         // Prepare the ffi_cif structure.
         if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
                                    arg_count, return_type, arg_types)) != FFI_OK) {
-            // Handle the ffi_status error.
+            JSValueRef arguments[1];
+            char* errmsg = NULL;
+            if (status == FFI_BAD_ABI) {
+                errmsg = "ffi_prep_cif failed returning FFI_BAD_ABI";
+            } else if (status == FFI_BAD_TYPEDEF) {
+                errmsg = "ffi_prep_cif failed returning FFI_BAD_TYPEDEF";
+            } else {
+                errmsg = "ffi_prep_cif failed";
+            }
+            arguments[0] = c_string_to_value(ctx, errmsg);
+            *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+            return JSValueMakeNull(ctx);
         }
 
         JSObjectRef arg_values_ref = JSValueToObject(ctx, args[3], NULL);
@@ -227,8 +251,12 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
                     *(long double *) arg_values[i] = JSValueToNumber(ctx, arg_value, NULL);
                     break;
 #endif
-                default:
-                    // TODO should not reach here
+                default: {
+                    JSValueRef arguments[1];
+                    arguments[0] = c_string_to_value(ctx, "unhandled type ints case");
+                    *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+                    return JSValueMakeNull(ctx);
+                }
                     break;
             }
         }
@@ -272,8 +300,12 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
                 result = malloc(sizeof(long double));
                 break;
 #endif
-            default:
-                // TODO should not reach here
+            default: {
+                JSValueRef arguments[1];
+                arguments[0] = c_string_to_value(ctx, "unhandled result type ints case");
+                *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+                return JSValueMakeNull(ctx);
+            }
                 break;
         }
 
@@ -326,8 +358,12 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
                 rv = JSValueMakeNumber(ctx, temp);
                 break;
 #endif
-            default:
-                // TODO should not reach here
+            default: {
+                JSValueRef arguments[1];
+                arguments[0] = c_string_to_value(ctx, "unhandled result marshal type ints case");
+                *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+                return JSValueMakeNull(ctx);
+            }
                 break;
         }
 
