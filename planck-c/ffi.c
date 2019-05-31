@@ -178,7 +178,8 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
             arg_types[i] = int_to_ffi_type(type_ints[i]);
         }
 
-        ffi_type *return_type = int_to_ffi_type((int) JSValueToNumber(ctx, args[1], NULL));
+        int return_type_int = (int) JSValueToNumber(ctx, args[1], NULL);
+        ffi_type *return_type = int_to_ffi_type(return_type_int);
 
         ffi_status status;
 
@@ -261,10 +262,10 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
             }
         }
 
-        // TODO switch on return type
+        // Allocate space to hold the return value
 
-        void *result = malloc(sizeof(double));
-        switch (type_ints[i]) {
+        void *result = NULL;
+        switch (return_type_int) {
             case FFI_TYPE_UINT8:
                 result = malloc(1);
                 break;
@@ -311,9 +312,11 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
 
         ffi_call(&cif, fp, result, arg_values);
 
+        // Marshal the return value
+
         JSValueRef rv = NULL;
         double temp;
-        switch (type_ints[i]) {
+        switch (return_type_int) {
             case FFI_TYPE_UINT8:
                 temp = (double) *(unsigned char *) result;
                 rv = JSValueMakeNumber(ctx, temp);
