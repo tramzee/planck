@@ -6,6 +6,7 @@
 
 #include <stdlib.h>
 #include <dlfcn.h>
+#include <sys/utsname.h>
 
 #include "ffi.h"
 #include "jsc_utils.h"
@@ -338,6 +339,38 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
     }
 
     return JSValueMakeNull(ctx);
+}
+
+JSValueRef function_uname(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
+                          size_t argc, const JSValueRef args[], JSValueRef *exception) {
+
+    struct utsname struct_utsname;
+    int rv = uname(&struct_utsname);
+    if (rv == -1) {
+        JSValueRef arguments[1];
+        arguments[0] = c_string_to_value(ctx, strerror(errno));
+        *exception = JSObjectMakeError(ctx, 1, arguments, NULL);
+        return JSValueMakeNull(ctx);
+    } else {
+        JSObjectRef result = JSObjectMake(ctx, NULL, NULL);
+        JSObjectSetProperty(ctx, result, JSStringCreateWithUTF8CString("sysname"),
+                            c_string_to_value(ctx, struct_utsname.sysname),
+                            kJSPropertyAttributeReadOnly, NULL);
+        JSObjectSetProperty(ctx, result, JSStringCreateWithUTF8CString("nodename"),
+                            c_string_to_value(ctx, struct_utsname.nodename),
+                            kJSPropertyAttributeReadOnly, NULL);
+        JSObjectSetProperty(ctx, result, JSStringCreateWithUTF8CString("release"),
+                            c_string_to_value(ctx, struct_utsname.release),
+                            kJSPropertyAttributeReadOnly, NULL);
+        JSObjectSetProperty(ctx, result, JSStringCreateWithUTF8CString("version"),
+                            c_string_to_value(ctx, struct_utsname.version),
+                            kJSPropertyAttributeReadOnly, NULL);
+        JSObjectSetProperty(ctx, result, JSStringCreateWithUTF8CString("machine"),
+                            c_string_to_value(ctx, struct_utsname.machine),
+                            kJSPropertyAttributeReadOnly, NULL);
+        return result;
+    }
+
 }
 
 /*
