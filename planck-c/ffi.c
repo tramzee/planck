@@ -1,5 +1,7 @@
 #ifdef __APPLE__
+
 #include <ffi/ffi.h>
+
 #else
 #include <ffi.h>
 #endif
@@ -187,7 +189,7 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
         if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
                                    arg_count, return_type, arg_types)) != FFI_OK) {
             JSValueRef arguments[1];
-            char* errmsg = NULL;
+            char *errmsg = NULL;
             if (status == FFI_BAD_ABI) {
                 errmsg = "ffi_prep_cif failed returning FFI_BAD_ABI";
             } else if (status == FFI_BAD_TYPEDEF) {
@@ -382,13 +384,13 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
 }
 
 typedef struct native_info {
-    void* fp;
+    void *fp;
     ffi_cif cif;
     size_t arg_count;
-    int* type_ints;
+    int *type_ints;
     int return_type_int;
     void **arg_values;
-    void* result;
+    void *result;
 } native_info_t;
 
 native_info_t native_infos[1024];
@@ -454,7 +456,7 @@ JSValueRef function_invoke_native(JSContextRef ctx, JSObjectRef function, JSObje
         }
     }
 
-    void* result = native_info->result;
+    void *result = native_info->result;
 
     ffi_call(&native_info->cif, native_info->fp, result, arg_values);
 
@@ -527,7 +529,7 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
         && JSValueGetType(ctx, args[0]) == kJSTypeString // Encoded fp
         && JSValueGetType(ctx, args[1]) == kJSTypeNumber // return type
         && JSValueGetType(ctx, args[2]) == kJSTypeObject // array of numbers, arg types
-        ) {
+            ) {
 
         size_t native_infos_ndx = 0;
 
@@ -564,7 +566,7 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
         if ((status = ffi_prep_cif(&native_infos[native_infos_ndx].cif, FFI_DEFAULT_ABI,
                                    arg_count, return_type, arg_types)) != FFI_OK) {
             JSValueRef arguments[1];
-            char* errmsg = NULL;
+            char *errmsg = NULL;
             if (status == FFI_BAD_ABI) {
                 errmsg = "ffi_prep_cif failed returning FFI_BAD_ABI";
             } else if (status == FFI_BAD_TYPEDEF) {
@@ -577,7 +579,7 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
             return JSValueMakeNull(ctx);
         }
 
-        native_infos[native_infos_ndx].arg_values = malloc((sizeof (void*)) * arg_count);
+        native_infos[native_infos_ndx].arg_values = malloc((sizeof(void *)) * arg_count);
         for (i = 0; i < arg_count; i++) {
             switch (native_infos[native_infos_ndx].type_ints[i]) {
                 case FFI_TYPE_UINT8:
