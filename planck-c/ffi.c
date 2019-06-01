@@ -555,6 +555,7 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
         }
 
         int return_type_int = (int) JSValueToNumber(ctx, args[1], NULL);
+        native_infos[native_infos_ndx].return_type_int = return_type_int;
         ffi_type *return_type = int_to_ffi_type(return_type_int);
 
         ffi_status status;
