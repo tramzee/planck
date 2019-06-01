@@ -532,6 +532,8 @@ void *do_engine_init(void *data) {
     register_global_function(ctx, "PLANCK_DLSYM", function_dlsym);
     register_global_function(ctx, "PLANCK_DLCLOSE", function_dlclose);
     register_global_function(ctx, "PLANCK_NATIVE_CALL", function_native_call);
+    register_global_function(ctx, "PLANCK_INVOKE_NATIVE", function_invoke_native);
+    register_global_function(ctx, "PLANCK_REGISTER_NATIVE", function_register_native);
     register_global_function(ctx, "PLANCK_UNAME", function_uname);
 
     display_launch_timing("register fns");

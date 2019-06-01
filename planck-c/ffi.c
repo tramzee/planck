@@ -382,7 +382,8 @@ JSValueRef function_native_call(JSContextRef ctx, JSObjectRef function, JSObject
 }
 
 typedef struct native_info {
-    ffi_cif* cifp;
+    void* fp;
+    ffi_cif cif;
     size_t arg_count;
     int* type_ints;
     int return_type_int;
@@ -454,7 +455,8 @@ JSValueRef function_invoke_native(JSContextRef ctx, JSObjectRef function, JSObje
     }
 
     void* result = native_info->result;
-    ffi_call(native_info->cifp, fp, result, arg_values);
+
+    ffi_call(&native_info->cif, native_info->fp, result, arg_values);
 
     int return_type_int = native_info->return_type_int;
 
@@ -519,7 +521,6 @@ JSValueRef function_invoke_native(JSContextRef ctx, JSObjectRef function, JSObje
     return rv;
 }
 
-
 JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject,
                                     size_t argc, const JSValueRef args[], JSValueRef *exception) {
     if (argc > 0
@@ -528,25 +529,29 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
         && JSValueGetType(ctx, args[2]) == kJSTypeObject // array of numbers, arg types
         ) {
 
+        size_t native_infos_ndx = 0;
+
         char *fp_str = value_to_c_string(ctx, args[0]);
         void *fp = str_to_void_star(fp_str);
+        native_infos[native_infos_ndx].fp = fp;
         free(fp_str);
 
         unsigned int arg_count = 1; // TODO, derive from args[2] length
+        native_infos[native_infos_ndx].arg_count = arg_count;
 
         JSObjectRef arg_types_ref = JSValueToObject(ctx, args[2], NULL);
 
-        int type_ints[arg_count];
+        native_infos[native_infos_ndx].type_ints = malloc(sizeof(int) * arg_count);
         unsigned int i;
         for (i = 0; i < arg_count; i++) {
-            type_ints[i] = (int) JSValueToNumber(ctx, JSObjectGetPropertyAtIndex(ctx, arg_types_ref, i, NULL), NULL);
+            native_infos[native_infos_ndx].type_ints[i] =
+                    (int) JSValueToNumber(ctx, JSObjectGetPropertyAtIndex(ctx, arg_types_ref, i, NULL), NULL);
         }
 
-        ffi_cif cif;
         ffi_type *arg_types[arg_count];
 
         for (i = 0; i < arg_count; i++) {
-            arg_types[i] = int_to_ffi_type(type_ints[i]);
+            arg_types[i] = int_to_ffi_type(native_infos[native_infos_ndx].type_ints[i]);
         }
 
         int return_type_int = (int) JSValueToNumber(ctx, args[1], NULL);
@@ -555,7 +560,7 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
         ffi_status status;
 
         // Prepare the ffi_cif structure.
-        if ((status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI,
+        if ((status = ffi_prep_cif(&native_infos[native_infos_ndx].cif, FFI_DEFAULT_ABI,
                                    arg_count, return_type, arg_types)) != FFI_OK) {
             JSValueRef arguments[1];
             char* errmsg = NULL;
@@ -571,45 +576,42 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
             return JSValueMakeNull(ctx);
         }
 
-        JSObjectRef arg_values_ref = JSValueToObject(ctx, args[3], NULL);
-
-        void *arg_values[arg_count];
+        native_infos[native_infos_ndx].arg_values = malloc((sizeof (void*)) * arg_count);
         for (i = 0; i < arg_count; i++) {
-            JSValueRef arg_value = JSObjectGetPropertyAtIndex(ctx, arg_values_ref, i, NULL);
-            switch (type_ints[i]) {
+            switch (native_infos[native_infos_ndx].type_ints[i]) {
                 case FFI_TYPE_UINT8:
-                    arg_values[i] = malloc(1);
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(1);
                     break;
                 case FFI_TYPE_SINT8:
-                    arg_values[i] = malloc(1);
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(1);
                     break;
                 case FFI_TYPE_UINT16:
-                    arg_values[i] = malloc(2);
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(2);
                     break;
                 case FFI_TYPE_SINT16:
-                    arg_values[i] = malloc(2);
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(2);
                     break;
                 case FFI_TYPE_UINT32:
-                    arg_values[i] = malloc(4);
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(4);
                     break;
                 case FFI_TYPE_SINT32:
-                    arg_values[i] = malloc(4);
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(4);
                     break;
                 case FFI_TYPE_UINT64:
-                    arg_values[i] = malloc(8);
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(8);
                     break;
                 case FFI_TYPE_SINT64:
-                    arg_values[i] = malloc(8);
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(8);
                     break;
                 case FFI_TYPE_FLOAT:
-                    arg_values[i] = malloc(sizeof(float));
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(sizeof(float));
                     break;
                 case FFI_TYPE_DOUBLE:
-                    arg_values[i] = malloc(sizeof(double));
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(sizeof(double));
                     break;
 #ifdef FFI_TYPE_LONGDOUBLE
                 case FFI_TYPE_LONGDOUBLE:
-                    arg_values[i] = malloc(sizeof(long double));
+                    native_infos[native_infos_ndx].arg_values[i] = malloc(sizeof(long double));
                     break;
 #endif
                 default: {
@@ -624,41 +626,40 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
 
         // Allocate space to hold the return value
 
-        void *result = NULL;
         switch (return_type_int) {
             case FFI_TYPE_UINT8:
-                result = malloc(1);
+                native_infos[native_infos_ndx].result = malloc(1);
                 break;
             case FFI_TYPE_SINT8:
-                result = malloc(1);
+                native_infos[native_infos_ndx].result = malloc(1);
                 break;
             case FFI_TYPE_UINT16:
-                result = malloc(2);
+                native_infos[native_infos_ndx].result = malloc(2);
                 break;
             case FFI_TYPE_SINT16:
-                result = malloc(2);
+                native_infos[native_infos_ndx].result = malloc(2);
                 break;
             case FFI_TYPE_UINT32:
-                result = malloc(4);
+                native_infos[native_infos_ndx].result = malloc(4);
                 break;
             case FFI_TYPE_SINT32:
-                result = malloc(4);
+                native_infos[native_infos_ndx].result = malloc(4);
                 break;
             case FFI_TYPE_UINT64:
-                result = malloc(8);
+                native_infos[native_infos_ndx].result = malloc(8);
                 break;
             case FFI_TYPE_SINT64:
-                result = malloc(8);
+                native_infos[native_infos_ndx].result = malloc(8);
                 break;
             case FFI_TYPE_FLOAT:
-                result = malloc(sizeof(float));
+                native_infos[native_infos_ndx].result = malloc(sizeof(float));
                 break;
             case FFI_TYPE_DOUBLE:
-                result = malloc(sizeof(double));
+                native_infos[native_infos_ndx].result = malloc(sizeof(double));
                 break;
 #ifdef FFI_TYPE_LONGDOUBLE
             case FFI_TYPE_LONGDOUBLE:
-                result = malloc(sizeof(long double));
+                native_infos[native_infos_ndx].result = malloc(sizeof(long double));
                 break;
 #endif
             default: {
