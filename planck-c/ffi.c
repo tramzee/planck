@@ -500,7 +500,7 @@ JSValueRef function_invoke_native(JSContextRef ctx, JSObjectRef function, JSObje
             rv = JSValueMakeNumber(ctx, temp);
             break;
         case FFI_TYPE_FLOAT:
-            result = malloc(sizeof(float));
+            rv = JSValueMakeNumber(ctx, *(float *) result);
             break;
         case FFI_TYPE_DOUBLE:
             rv = JSValueMakeNumber(ctx, *(double *) result);
@@ -579,7 +579,7 @@ JSValueRef function_register_native(JSContextRef ctx, JSObjectRef function, JSOb
             return JSValueMakeNull(ctx);
         }
 
-        native_infos[native_infos_ndx].arg_values = malloc((sizeof(void *)) * arg_count);
+        native_infos[native_infos_ndx].arg_values = malloc(sizeof(void *) * arg_count);
         for (i = 0; i < arg_count; i++) {
             switch (native_infos[native_infos_ndx].type_ints[i]) {
                 case FFI_TYPE_UINT8:
