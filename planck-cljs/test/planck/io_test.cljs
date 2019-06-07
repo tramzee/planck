@@ -152,11 +152,15 @@
   (is (= (planck.io/file "/a/b/c") (planck.io/file "/a" "b" "c"))))
 
 (deftest copy-test
-  (let [content       (apply str (repeat 67 "abcñdef\nafÈ§sdadsf\nταБЬℓσ\u1234fdsa\n"))
+  (let [content       (apply str (repeat 1 "abcñdef\nafÈ§sdadsf\nταБЬℓσ\u1234fdsa\n"))
         src           "/tmp/plk-copy-src.txt"
         dst           "/tmp/plk-copy-dst.txt"
         no-diff       (fn [src dst]
-                        (zero? (:exit (shell/sh "diff" src dst))))]
+                        (let [rv (zero? (:exit (shell/sh "diff" src dst)))]
+                          (when-not rv
+                            (prn (slurp src))
+                            (prn (slurp dst)))
+                          rv))]
     (spit src content)
     (testing "InputStream -> OutputStream"
       (with-open [in (io/input-stream src)
