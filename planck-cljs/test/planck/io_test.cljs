@@ -162,6 +162,7 @@
                             (prn (slurp dst)))
                           rv))]
     (spit src content)
+    (prn 'beginning content (count content) (seq content) (slurp src) (count (slurp src)) (seq (slurp src)))
     (testing "InputStream -> OutputStream"
       (with-open [in (io/input-stream src)
                   out (io/output-stream dst)]
