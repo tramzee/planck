@@ -152,7 +152,7 @@
   (is (= (planck.io/file "/a/b/c") (planck.io/file "/a" "b" "c"))))
 
 (deftest copy-test
-  (let [content       (apply str (repeat 6754 "abcñdef\nafÈ§sdadsf\nταБЬℓσ\u1234fdsa\n"))
+  (let [content       (apply str (repeat 67 "abcñdef\nafÈ§sdadsf\nταБЬℓσ\u1234fdsa\n"))
         src           "/tmp/plk-copy-src.txt"
         dst           "/tmp/plk-copy-dst.txt"
         no-diff       (fn [src dst]
@@ -201,7 +201,7 @@
       (io/copy (io/file src) (io/file dst))
       (is (no-diff src dst)))
     ; Commented until https://github.com/planck-repl/planck/issues/951 is fixed
-    #_(testing "String -> OutputStream"
+    (testing "String -> OutputStream"
       (with-open [out (io/output-stream dst)]
         (io/copy content out))
       (is (no-diff src dst)))
