@@ -206,6 +206,7 @@
       (is (no-diff src dst)))
     ; Commented until https://github.com/planck-repl/planck/issues/951 is fixed
     (testing "String -> OutputStream"
+      (prn ((comp js/unescape js/encodeURIComponent) "abcñdef"))
       (with-open [out (io/output-stream dst)]
         (io/copy content out))
       (is (no-diff src dst)))
