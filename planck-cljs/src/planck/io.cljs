@@ -2,6 +2,7 @@
   "Planck I/O functionality."
   (:refer-clojure :exclude [exists?])
   (:require
+   [cljs-bean.core :refer [bean]]
    [cljs.spec.alpha :as s]
    [clojure.string :as string]
    [planck.core :refer [with-open]]
@@ -330,7 +331,7 @@
     as-file
     :path
     js/PLANCK_FSTAT
-    (js->clj :keywordize-keys true)
+    bean
     (update-in [:type] keyword)
     (update-in [:created] #(js/Date. %))
     (update-in [:modified] #(js/Date. %))))
