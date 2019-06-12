@@ -14,6 +14,10 @@ All notable changes to this project will be documented in this file. This change
 ### Deprecated
 - Deprecate `planck.socket.alpha` namespace ([#956](https://github.com/planck-repl/planck/issues/956))
 
+### Removed
+
+- Remove deprecated `io/read-line`, `io/slurp`, `io/spit` ([#963](https://github.com/planck-repl/planck/issues/963))
+
 ### Fixed
 - `tty?` spec refers to `planck.core/IWriter` ([#928](https://github.com/planck-repl/planck/issues/928))
 - HTTP binary response includes trailing buffer ([#949](https://github.com/planck-repl/planck/issues/949))
